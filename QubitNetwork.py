@@ -85,6 +85,94 @@ def chars2pair(chars):
     return tuple(out_pair)
 
 
+def generate_training_data(net, target_unitary, size):
+    """Generates a set of training data for the QubitNetwork net."""
+    if type(net) != QubitNetwork:
+        raise ValueError('net must be an instance of the class QubitNetwork.')
+    vectors_size = 2 * 2 ** net.num_system_qubits
+    training_states = np.random.randn(size, vectors_size)
+    norms = np.sqrt(np.einsum('ij,ij->i', training_states, training_states))
+    training_states /= norms[:, np.newaxis]
+
+    # make sure that target_unitary is a numpy array
+    target_unitary = np.asarray(target_unitary)
+    # make sure that target_unitary has the correct size
+    if not target_unitary.shape[0] == vectors_size:
+        raise ValueError('Wrong dimensions for target_unitary.')
+
+    return training_states, np.dot(training_states, target_unitary)
+
+
+def fidelity(net, J, state, target_state):
+    """This is the cost function of the model.
+
+    Parameters
+    ----------
+    net : A QubitNetwork object, containing the necessary data about
+          the qubit network to trin (dimensions, used interactions and so on).
+    J : A theano.shared variable for the the parameters of the network to
+        train using MSGD.
+    state : This function computes the fidelity between the state obtained
+            evolving *state* through the network with parameters J, traced
+            over the ancilla degrees of freedom, and target_state.
+    target_state : The label corresponding to the training datum *state*
+
+    Returns
+    -------
+    A theano function, to be used for a MSGD algorithm
+    """
+
+    # net.hs_factors and net.Js_factors are already in big real matrix form,
+    # and already multiplied by 1j
+    H_factors = np.concatenate((net.hs_factors, net.Js_factors), axis=0)
+    # this builds the Hamiltonian of the system (in big real matrix form),
+    # already multiplied with the 1j factor and ready for exponentiation
+    H = T.tensordot(J, H_factors, axes=1)
+    # expH is the unitary evolution of the system
+    expH = T.slinalg.expm(H)
+
+    # net.initial_state is the initial state stored as a vector (ket),
+    # multiplying it on the left by expH amounts to evolve it
+    expH_times_state = T.dot(expH, state)
+    # build the density matrix out of the evolved state
+    dm = expH_times_state * expH_times_state.T
+    dm_real = dm[0:dm.shape[0] // 2, 0:dm.shape[1] // 2]
+    dm_imag = dm[0:dm.shape[0] // 2, dm.shape[1] // 2:]
+    # partial trace of the density matrix
+
+    def col_fn(col_idx, row_idx, matrix):
+        subm_dim = 2 ** net.num_ancillas
+        return T.nlinalg.trace(
+            matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
+                   col_idx * subm_dim:(col_idx + 1) * subm_dim])
+
+    def row_fn(row_idx, matrix):
+        results, _ = theano.scan(
+            fn=col_fn,
+            sequences=T.arange(matrix.shape[1] // 2 ** net.num_ancillas),
+            non_sequences=[row_idx, matrix]
+        )
+        return results
+    dm_real_traced, _ = theano.scan(
+        fn=row_fn,
+        sequences=T.arange(dm_real.shape[0] // 2 ** net.num_ancillas),
+        non_sequences=[dm_real]
+    )
+    dm_imag_traced, _ = theano.scan(
+        fn=row_fn,
+        sequences=T.arange(dm_imag.shape[0] // 2 ** net.num_ancillas),
+        non_sequences=[dm_imag]
+    )
+    dm_traced_r1 = T.concatenate((dm_real_traced, -dm_imag_traced), axis=1)
+    dm_traced_r2 = T.concatenate((dm_imag_traced, dm_real_traced), axis=1)
+    dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
+
+    # target_u = complex2bigreal(qutip.qip.fredkin().data.toarray())
+    # target_state = T.dot(target_unitary, state)
+    # fidelity = target_evolved_state.T.dot(target_u.dot(target_evolved_state))
+    return T.dot(target_state.T, T.dot(dm_traced, target_state))
+
+
 class QubitNetwork:
     def __init__(self, num_qubits,
                  interactions='all', self_interactions='all',
@@ -104,7 +192,7 @@ class QubitNetwork:
             raise ValueError('Invalid value for system_qubits.')
         # it will still be useful in the following to have direct access
         # to the number of ancilla and system qubits
-        self.num_ancilla_qubits = self.num_qubits - len(self.system_qubits)
+        self.num_ancillas = self.num_qubits - len(self.system_qubits)
         self.num_system_qubits = len(self.system_qubits)
 
         # we store all the possible pairs for convenience
@@ -122,8 +210,17 @@ class QubitNetwork:
 
         # the initial state is here build in big real form, with all
         # the qubits initialized in the up position
-        (self.initial_state,
-         self.initial_system_state) = self.build_initial_state_vector()
+        # (self.initial_state,
+        #  self.initial_system_state) = self.build_initial_state_vector()
+        self.ancillas_state = self.build_ancilla_state()
+
+        # self.J is the set of parameters that we want to train
+        self.J = theano.shared(
+            value=np.zeros(
+                self.num_interactions + self.num_self_interactions),
+            name='J',
+            borrow=True
+        )
 
     def decode_interactions(self, interactions):
         """Returns an OrderedDict with the requested interactions.
@@ -225,6 +322,7 @@ class QubitNetwork:
         return np.asarray(Js_factors), np.asarray(hs_factors)
 
     def build_initial_state_vector(self):
+        """Probably DEPRECATED."""
         state = qutip.tensor([qutip.basis(2, 0)
                               for _ in range(self.num_qubits)])
         state = state.data.toarray()
@@ -235,3 +333,14 @@ class QubitNetwork:
         system_state = np.concatenate(
             (np.real(system_state), np.imag(system_state)), axis=0)
         return state, system_state
+
+    def build_ancilla_state(self):
+        """Returns an initial ancilla state.
+
+        The generated state has every ancillary qubit in the up position.
+        """
+        state = qutip.tensor([qutip.basis(2, 0)
+                              for _ in range(self.num_ancillas)])
+        state = state.data.toarray()
+        state = np.concatenate((np.real(state), np.imag(state)), axis=0)
+        return state
