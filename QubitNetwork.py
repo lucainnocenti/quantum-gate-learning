@@ -85,94 +85,6 @@ def chars2pair(chars):
     return tuple(out_pair)
 
 
-def generate_training_data(net, target_unitary, size):
-    """Generates a set of training data for the QubitNetwork net."""
-    if type(net) != QubitNetwork:
-        raise ValueError('net must be an instance of the class QubitNetwork.')
-    vectors_size = 2 * 2 ** net.num_system_qubits
-    training_states = np.random.randn(size, vectors_size)
-    norms = np.sqrt(np.einsum('ij,ij->i', training_states, training_states))
-    training_states /= norms[:, np.newaxis]
-
-    # make sure that target_unitary is a numpy array
-    target_unitary = np.asarray(target_unitary)
-    # make sure that target_unitary has the correct size
-    if not target_unitary.shape[0] == vectors_size:
-        raise ValueError('Wrong dimensions for target_unitary.')
-
-    return training_states, np.dot(training_states, target_unitary)
-
-
-def fidelity(net, J, state, target_state):
-    """This is the cost function of the model.
-
-    Parameters
-    ----------
-    net : A QubitNetwork object, containing the necessary data about
-          the qubit network to trin (dimensions, used interactions and so on).
-    J : A theano.shared variable for the the parameters of the network to
-        train using MSGD.
-    state : This function computes the fidelity between the state obtained
-            evolving *state* through the network with parameters J, traced
-            over the ancilla degrees of freedom, and target_state.
-    target_state : The label corresponding to the training datum *state*
-
-    Returns
-    -------
-    A theano function, to be used for a MSGD algorithm
-    """
-
-    # net.hs_factors and net.Js_factors are already in big real matrix form,
-    # and already multiplied by 1j
-    H_factors = np.concatenate((net.hs_factors, net.Js_factors), axis=0)
-    # this builds the Hamiltonian of the system (in big real matrix form),
-    # already multiplied with the 1j factor and ready for exponentiation
-    H = T.tensordot(J, H_factors, axes=1)
-    # expH is the unitary evolution of the system
-    expH = T.slinalg.expm(H)
-
-    # net.initial_state is the initial state stored as a vector (ket),
-    # multiplying it on the left by expH amounts to evolve it
-    expH_times_state = T.dot(expH, state)
-    # build the density matrix out of the evolved state
-    dm = expH_times_state * expH_times_state.T
-    dm_real = dm[0:dm.shape[0] // 2, 0:dm.shape[1] // 2]
-    dm_imag = dm[0:dm.shape[0] // 2, dm.shape[1] // 2:]
-    # partial trace of the density matrix
-
-    def col_fn(col_idx, row_idx, matrix):
-        subm_dim = 2 ** net.num_ancillas
-        return T.nlinalg.trace(
-            matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
-                   col_idx * subm_dim:(col_idx + 1) * subm_dim])
-
-    def row_fn(row_idx, matrix):
-        results, _ = theano.scan(
-            fn=col_fn,
-            sequences=T.arange(matrix.shape[1] // 2 ** net.num_ancillas),
-            non_sequences=[row_idx, matrix]
-        )
-        return results
-    dm_real_traced, _ = theano.scan(
-        fn=row_fn,
-        sequences=T.arange(dm_real.shape[0] // 2 ** net.num_ancillas),
-        non_sequences=[dm_real]
-    )
-    dm_imag_traced, _ = theano.scan(
-        fn=row_fn,
-        sequences=T.arange(dm_imag.shape[0] // 2 ** net.num_ancillas),
-        non_sequences=[dm_imag]
-    )
-    dm_traced_r1 = T.concatenate((dm_real_traced, -dm_imag_traced), axis=1)
-    dm_traced_r2 = T.concatenate((dm_imag_traced, dm_real_traced), axis=1)
-    dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-
-    # target_u = complex2bigreal(qutip.qip.fredkin().data.toarray())
-    # target_state = T.dot(target_unitary, state)
-    # fidelity = target_evolved_state.T.dot(target_u.dot(target_evolved_state))
-    return T.dot(target_state.T, T.dot(dm_traced, target_state))
-
-
 class QubitNetwork:
     def __init__(self, num_qubits,
                  interactions='all', self_interactions='all',
@@ -343,4 +255,166 @@ class QubitNetwork:
                               for _ in range(self.num_ancillas)])
         state = state.data.toarray()
         state = np.concatenate((np.real(state), np.imag(state)), axis=0)
-        return state
+        return state.reshape(state.shape[0])
+
+    def generate_training_data(self, target_unitary, size):
+        """Generates a set of training data for the QubitNetwork net.
+
+        Returns
+        -------
+        A tuple with two elements: training vectors and labels.
+        NOTE: The training and target vectors have different lengths!
+              The latter span the whole space while the former only the
+              system one.
+
+        training_states: an array of vectors. Each vector represents a
+                         state in the full system+ancilla space, in big
+                         real form.
+        target_states: an array of vectors. Each vector represents a
+                       state in only the system space, in big real form.
+                       Every such state is generated by evolving a
+                       corresponding training_state through the matrix
+                       target_unitary.
+        """
+        vectors_size = 2 * 2 ** self.num_system_qubits
+        # generate a number *size* of normalized vectors, each one of
+        # length *vectors_size*.
+        training_states = np.random.randn(size, vectors_size)
+        norms = np.sqrt(
+            np.einsum('ij,ij->i', training_states, training_states))
+        training_states /= norms[:, np.newaxis]
+
+        # make sure that *target_unitary* is a numpy array
+        target_unitary = np.asarray(target_unitary)
+        # make sure that *target_unitary* has the correct size
+        if not target_unitary.shape[0] == vectors_size:
+            raise ValueError('Wrong dimensions for target_unitary.')
+        target_states = np.dot(training_states, target_unitary)
+
+        # now compute the tensor product between every element of
+        # *target_states* and the ancilla state. Note that this is not
+        # done in the usual way due to the use of the big real form.
+
+        # ---------------------- WARNING ---------------------------
+
+        # THE FOLLOWING COMPUTATION ASSUMES A REAL VECTOR FOR THE ANCILLA
+        # STATE, AND A SINGLE ANCILLA QUBIT
+
+        # ---------------------- WARNING ---------------------------
+        training_states = training_states.reshape(
+            training_states.shape[0],
+            2,
+            training_states.shape[1] // 2
+        )
+        training_states = np.einsum('kij,l->kilj',
+                                    training_states,
+                                    self.ancillas_state[:2])
+        training_states = training_states.reshape(
+            training_states.shape[0], 2 * vectors_size
+        )
+
+        return training_states, target_states
+
+    def fidelity(self, states, target_states):
+        """This is the cost function of the model.
+
+        Parameters
+        ----------
+        states : This function computes the fidelity between the states
+                obtained evolving the elements of *states* through the
+                network with parameters J, traced over the ancilla
+                degrees of freedom, and the elements of *target_states*.
+                Note that here *states* is a vector whose elements
+                represent a state over the whole system+ancilla
+                space, in big real form.
+        target_states: The labels corresponding to the training data
+                      *states*. Note that *target_states* is a an array
+                      of vectors representing a system-only state in
+                      real big form.
+
+        Returns
+        -------
+        A theano function, to be used for an MSGD algorithm
+        """
+
+        # self.hs_factors and self.Js_factors are already in big real
+        # matrix form, and already multiplied by 1j
+        H_factors = np.concatenate((self.hs_factors, self.Js_factors), axis=0)
+        # this builds the Hamiltonian of the system (in big real matrix form),
+        # already multiplied with the 1j factor and ready for exponentiation
+        H = T.tensordot(self.J, H_factors, axes=1)
+        # expH is the unitary evolution of the system
+        expH = T.slinalg.expm(H)
+
+        # expH_times_state is the full output state given by the network
+        # state in general is a matrix (array of state vectors) so that
+        # expH_times_state is also a matrix with a number of rows equal
+        # to the number of training vectors.
+        expH_times_state = T.dot(states, expH)
+
+        # build the density matrices out of the evolved states
+        def col_fn(col_idx, row_idx, matrix):
+            subm_dim = 2 ** self.num_ancillas
+            return T.nlinalg.trace(
+                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
+                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
+
+        def row_fn(row_idx, matrix):
+            results, _ = theano.scan(
+                fn=col_fn,
+                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
+                non_sequences=[row_idx, matrix]
+            )
+            return results
+
+        def fn(i, matrix):
+            dm = T.dot(matrix[i], matrix[i].T)
+            dm_real = dm[0:dm.shape[0] // 2, 0:dm.shape[1] // 2]
+            dm_imag = dm[0:dm.shape[0] // 2, dm.shape[1] // 2:]
+            dm_real_traced, _ = theano.scan(
+                fn=row_fn,
+                sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
+                non_sequences=[dm_real]
+            )
+            dm_imag_traced, _ = theano.scan(
+                fn=row_fn,
+                sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
+                non_sequences=[dm_imag]
+            )
+            dm_traced_r1 = T.concatenate(
+                (dm_real_traced, -dm_imag_traced),
+                axis=1
+            )
+            dm_traced_r2 = T.concatenate(
+                (dm_imag_traced, dm_real_traced),
+                axis=1
+            )
+            dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
+            return dm_traced
+
+        dm, _ = theano.scan(
+            fn=fn,
+            sequences=T.arange(expH_times_state.shape[0]),
+            non_sequences=expH_times_state
+        )
+        # partial trace of the density matrix
+
+
+        # target_u = complex2bigreal(qutip.qip.fredkin().data.toarray())
+        # target_state = T.dot(target_unitary, state)
+        # fidelity = target_evolved_state.T.dot(target_u.dot(target_evolved_state))
+        return T.dot(target_states.T, T.dot(dm_traced, target_states))
+
+
+def sgd_optimization(learning_rate=0.13, n_epochs=1000,
+                     batch_size=100):
+    print('Building the model...')
+
+    # allocate symbolic variables for the data
+    index = T.lscalar() # index to a minibatch
+
+    # generate symbolic variables for input data and labels
+    x = T.dmatrix('x') # input state (data). Every row is a state vector
+    y = T.dmatrix('y') # output target state (label). As above
+    pass
+
