@@ -334,7 +334,7 @@ class QubitNetwork:
 
         Returns
         -------
-        A theano function, to be used for an MSGD algorithm
+        A theano function, to be used for the MSGD algorithm
         """
 
         # self.hs_factors and self.Js_factors are already in big real
@@ -346,13 +346,15 @@ class QubitNetwork:
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 
-        # expH_times_state is the full output state given by the network
-        # state in general is a matrix (array of state vectors) so that
-        # expH_times_state is also a matrix with a number of rows equal
-        # to the number of training vectors.
-        expH_times_state = T.dot(states, expH)
+        # expH_times_state is the full output state given by the qubit
+        # network.
+        # *state* in general is a matrix (array of state vectors) so
+        # that *expH_times_state* is also a matrix with a number of
+        # rows equal to the number of training vectors.
+        expH_times_state = T.tensordot(states, expH, axes=([1], [0]))
 
-        # build the density matrices out of the evolved states
+        # *col_fn* and *row_fn* are used inside *build_density_matrices*
+        # to compute the partial traces
         def col_fn(col_idx, row_idx, matrix):
             subm_dim = 2 ** self.num_ancillas
             return T.nlinalg.trace(
@@ -367,8 +369,17 @@ class QubitNetwork:
             )
             return results
 
-        def fn(i, matrix):
-            dm = T.dot(matrix[i], matrix[i].T)
+        # *build_density_matrices* is to be called by the immediately
+        # following theano.scan, and its output is given to *dm*.
+        # Every call to *build_density_matrices* returns the density
+        # matrix obtained after tracing out the ancillary degrees of
+        # freedom. Overall *dm* will therefore be an array of such
+        # density matrices.
+        def build_density_matrices(i, matrix):
+            dm = T.dot(
+                matrix[i].reshape((matrix[i].shape[0], 1)),
+                matrix[i].reshape((1, matrix[i].shape[0]))
+            )
             dm_real = dm[0:dm.shape[0] // 2, 0:dm.shape[1] // 2]
             dm_imag = dm[0:dm.shape[0] // 2, dm.shape[1] // 2:]
             dm_real_traced, _ = theano.scan(
@@ -390,20 +401,25 @@ class QubitNetwork:
                 axis=1
             )
             dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-            return dm_traced
+            return T.dot(target_states.T, T.dot(dm_traced, target_states))
 
-        dm, _ = theano.scan(
-            fn=fn,
+        # *dm* is an array of density matrices, AFTER the partial trace
+        # over the ancillary degrees of freedom has been carried out
+        fidelities, _ = theano.scan(
+            fn=build_density_matrices,
             sequences=T.arange(expH_times_state.shape[0]),
             non_sequences=expH_times_state
         )
-        # partial trace of the density matrix
-
+        return T.mean(fidelities)
 
         # target_u = complex2bigreal(qutip.qip.fredkin().data.toarray())
         # target_state = T.dot(target_unitary, state)
-        # fidelity = target_evolved_state.T.dot(target_u.dot(target_evolved_state))
-        return T.dot(target_states.T, T.dot(dm_traced, target_states))
+        # fidelity = target_evolved_state.T.dot(target_u.dot(
+        # target_evolved_state))
+
+        # we want to implement with theano ops the equivalent of the
+        # following numpy.einsum call:
+        # np.einsum('ij,ijk,ik->i', target_states, dm, target_states)
 
 
 def sgd_optimization(learning_rate=0.13, n_epochs=1000,
@@ -411,10 +427,9 @@ def sgd_optimization(learning_rate=0.13, n_epochs=1000,
     print('Building the model...')
 
     # allocate symbolic variables for the data
-    index = T.lscalar() # index to a minibatch
+    index = T.lscalar()  # index to a minibatch
 
     # generate symbolic variables for input data and labels
-    x = T.dmatrix('x') # input state (data). Every row is a state vector
-    y = T.dmatrix('y') # output target state (label). As above
+    x = T.dmatrix('x')  # input state (data). Every row is a state vector
+    y = T.dmatrix('y')  # output target state (label). As above
     pass
-
