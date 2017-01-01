@@ -375,7 +375,7 @@ class QubitNetwork:
         # matrix obtained after tracing out the ancillary degrees of
         # freedom. Overall *dm* will therefore be an array of such
         # density matrices.
-        def build_density_matrices(i, matrix):
+        def compute_fidelities(i, matrix):
             dm = T.dot(
                 matrix[i].reshape((matrix[i].shape[0], 1)),
                 matrix[i].reshape((1, matrix[i].shape[0]))
@@ -403,10 +403,8 @@ class QubitNetwork:
             dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
             return T.dot(target_states.T, T.dot(dm_traced, target_states))
 
-        # *dm* is an array of density matrices, AFTER the partial trace
-        # over the ancillary degrees of freedom has been carried out
         fidelities, _ = theano.scan(
-            fn=build_density_matrices,
+            fn=compute_fidelities,
             sequences=T.arange(expH_times_state.shape[0]),
             non_sequences=expH_times_state
         )
@@ -422,9 +420,27 @@ class QubitNetwork:
         # np.einsum('ij,ijk,ik->i', target_states, dm, target_states)
 
 
-def sgd_optimization(learning_rate=0.13, n_epochs=1000,
+def sgd_optimization(learning_rate=0.13, n_epochs=100,
                      batch_size=100):
+
     print('Building the model...')
+
+    net = QubitNetwork(4, interactions=('all', ['zz']),
+                                    self_interactions=('all', ['x', 'y']),
+                                    system_qubits=[0, 1, 2])
+
+    # Generate training dataset. In this case the target unitary is
+    # fixed to be a Fredkin gate.
+
+    fredkin_gate = qutip.qip.fredkin().data.toarray()
+    fredkin_gate = complex2bigreal(fredkin_gate)
+    dataset = net.generate_training_data(fredkin_gate, 1000)
+    states = theano.shared(
+        np.asarray(dataset[0], dtype=theano.config.floatX)
+    )
+    target_states = theano.shared(
+        np.asarray(dataset[1], dtype=theano.config.floatX)
+    )
 
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a minibatch
@@ -432,4 +448,26 @@ def sgd_optimization(learning_rate=0.13, n_epochs=1000,
     # generate symbolic variables for input data and labels
     x = T.dmatrix('x')  # input state (data). Every row is a state vector
     y = T.dmatrix('y')  # output target state (label). As above
-    pass
+    # define the cost function, that is, the fidelity. This is the
+    # number we ought to maximize through the training.
+    cost = net.fidelity(x, y)
+
+    # compute the gradient of the cost
+    g_J = T.grad(cost=cost, wrt=net.J)
+
+    # specify how to update the parameters of the model as a list of
+    # (variable, update expression) pairs
+    updates = [(net.J, net.J - learning_rate * g_J)]
+
+    # compile the training function `train_model`, that while computing
+    # the cost at every iteration (batch), also updates the weights of
+    # the network based on the rules defined in `updates`.
+    train_model = theano.function(
+        inputs=[index],
+        outputs=cost,
+        updates=updates,
+        givens={
+            x: states[index * batch_size: (index + 1) * batch_size],
+            y: target_states[index * batch_size: (index + 1) * batch_size]
+        }
+    )
