@@ -8,6 +8,7 @@ import theano.tensor.slinalg
 import theano.tensor.nlinalg
 
 
+# theano.config.optimizer = 'None'
 def complexrandn(dim1, dim2):
     """Generates an array of pseudorandom, normally chosen, complex numbers."""
     big_matrix = np.random.randn(dim1, dim2, 2)
@@ -375,7 +376,7 @@ class QubitNetwork:
         # matrix obtained after tracing out the ancillary degrees of
         # freedom. Overall *dm* will therefore be an array of such
         # density matrices.
-        def compute_fidelities(i, matrix):
+        def compute_fidelities(i, matrix, target_states):
             dm = T.dot(
                 matrix[i].reshape((matrix[i].shape[0], 1)),
                 matrix[i].reshape((1, matrix[i].shape[0]))
@@ -401,12 +402,15 @@ class QubitNetwork:
                 axis=1
             )
             dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-            return T.dot(target_states.T, T.dot(dm_traced, target_states))
+            return T.dot(
+                target_states[i],
+                T.dot(dm_traced, target_states[i])
+            )
 
         fidelities, _ = theano.scan(
             fn=compute_fidelities,
             sequences=T.arange(expH_times_state.shape[0]),
-            non_sequences=expH_times_state
+            non_sequences=[expH_times_state, target_states]
         )
         return T.mean(fidelities)
 
@@ -425,9 +429,10 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
 
     print('Building the model...')
 
-    net = QubitNetwork(4, interactions=('all', ['zz']),
-                                    self_interactions=('all', ['x', 'y']),
-                                    system_qubits=[0, 1, 2])
+    net = QubitNetwork(num_qubits=4,
+                       interactions=('all', ['zz']),
+                       self_interactions=('all', ['x', 'y']),
+                       system_qubits=[0, 1, 2])
 
     # Generate training dataset. In this case the target unitary is
     # fixed to be a Fredkin gate.
@@ -471,3 +476,7 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
             y: target_states[index * batch_size: (index + 1) * batch_size]
         }
     )
+
+    print('Having fun...')
+    minibatch_avg_cost = train_model(0)
+    return minibatch_avg_cost
