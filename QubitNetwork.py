@@ -129,7 +129,7 @@ class QubitNetwork:
 
         # self.J is the set of parameters that we want to train
         self.J = theano.shared(
-            value=np.zeros(
+            value=np.random.randn(
                 self.num_interactions + self.num_self_interactions),
             name='J',
             borrow=True
@@ -226,6 +226,8 @@ class QubitNetwork:
         for qubit_idx, direction in self.active_hs.items():
             # - now direction is a list of characters among 'x', 'y' and 'z',
             # - s is either 'x', 'y', or 'z'
+            if not isinstance(direction, list):
+                raise TypeError('`direction` must be a list.')
             for s in direction:
                 term = terms_template
                 term[qubit_idx] = sigmas[chars2pair(s)[0]]
@@ -430,8 +432,8 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
     print('Building the model...')
 
     net = QubitNetwork(num_qubits=4,
-                       interactions=('all', ['zz']),
-                       self_interactions=('all', ['x', 'y']),
+                       interactions=('all', ['xx', 'zz']),
+                       self_interactions=('all', ['z']),
                        system_qubits=[0, 1, 2])
 
     # Generate training dataset. In this case the target unitary is
@@ -445,6 +447,14 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
     )
     target_states = theano.shared(
         np.asarray(dataset[1], dtype=theano.config.floatX)
+    )
+
+    test_dataset = net.generate_training_data(fredkin_gate, 100)
+    test_states = theano.shared(
+        np.asarray(test_dataset[0], dtype=theano.config.floatX)
+    )
+    test_target_states = theano.shared(
+        np.asarray(test_dataset[1], dtype=theano.config.floatX)
     )
 
     # allocate symbolic variables for the data
@@ -462,7 +472,7 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
-    updates = [(net.J, net.J - learning_rate * g_J)]
+    updates = [(net.J, net.J + learning_rate * g_J)]
 
     # compile the training function `train_model`, that while computing
     # the cost at every iteration (batch), also updates the weights of
@@ -477,6 +487,28 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
         }
     )
 
-    print('Having fun...')
-    minibatch_avg_cost = train_model(0)
-    return minibatch_avg_cost
+    test_model = theano.function(
+        inputs=[],
+        outputs=cost,
+        updates=None,
+        givens={
+            x: test_states,
+            y: test_target_states
+        }
+    )
+    # grad = theano.function(
+    #     inputs=[index],
+    #     outputs=g_J,
+    #     givens={
+    #         x: states[index * batch_size: (index + 1) * batch_size],
+    #         y: target_states[index * batch_size: (index + 1) * batch_size]
+    #     }
+    # )
+    print('Let\'s roll!')
+    n_train_batches = states.get_value().shape[0] // batch_size
+    for idx in range(100):
+        print('Epoch {}, '.format(idx), end='')
+        for minibatch_index in range(n_train_batches):
+            minibatch_avg_cost = train_model(minibatch_index)
+            # print('minibatch avg cost: {}'.format(minibatch_avg_cost))
+        print(test_model())
