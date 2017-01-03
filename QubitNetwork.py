@@ -12,7 +12,8 @@ from utils import chars2pair, complex2bigreal
 class QubitNetwork:
     def __init__(self, num_qubits,
                  interactions='all', self_interactions='all',
-                 system_qubits=None):
+                 system_qubits=None,
+                 J=None):
         # *self.num_qubits* is the TOTAL number of qubits in the network,
         # regardless of them being system or ancilla qubits
         self.num_qubits = num_qubits
@@ -22,8 +23,11 @@ class QubitNetwork:
         # are ancillas
         if system_qubits is None:
             self.system_qubits = tuple(range(num_qubits // 2))
-        elif np.all(np.asarray(system_qubits) < num_qubits):
+        elif (isinstance(system_qubits, list) and
+                np.all(np.asarray(system_qubits) < num_qubits)):
             self.system_qubits = tuple(system_qubits)
+        elif isinstance(system_qubits, int) and system_qubits <= num_qubits:
+            self.system_qubits = tuple(range(system_qubits))
         else:
             raise ValueError('Invalid value for system_qubits.')
         # it will still be useful in the following to have direct access
@@ -51,12 +55,19 @@ class QubitNetwork:
         self.ancillas_state = self.build_ancilla_state()
 
         # self.J is the set of parameters that we want to train
-        self.J = theano.shared(
-            value=np.random.randn(
-                self.num_interactions + self.num_self_interactions),
-            name='J',
-            borrow=True
-        )
+        if J is None:
+            self.J = theano.shared(
+                value=np.random.randn(
+                    self.num_interactions + self.num_self_interactions),
+                name='J',
+                borrow=True
+            )
+        else:
+            self.J = theano.shared(
+                value=np.asarray(J),
+                name='J',
+                borrow=True
+            )
 
     def decode_interactions(self, interactions):
         """Returns an OrderedDict with the requested interactions.
@@ -91,6 +102,9 @@ class QubitNetwork:
                 return OrderedDict(d)
             else:
                 raise ValueError('Invalid value for self_interactions.')
+        elif (isinstance(self_interactions, dict) and
+              all(isinstance(k, int) for k in self_interactions.keys())):
+            return OrderedDict(self_interactions)
         else:
             raise ValueError('Invalid value of self_interactions.')
 
@@ -241,6 +255,18 @@ class QubitNetwork:
 
         return training_states, target_states
 
+    def save_to_file(self, outfile):
+        import pickle
+        data = {
+            'num_qubits': self.num_qubits,
+            'num_system_qubits': self.num_system_qubits,
+            'active_hs': self.active_hs,
+            'active_Js': self.active_Js,
+            'J': self.J.get_value()
+        }
+        with open(outfile, 'wb') as file:
+            pickle.dump(data, file)
+
     def fidelity(self, states, target_states):
         """This is the cost function of the model.
 
@@ -349,15 +375,41 @@ class QubitNetwork:
         # np.einsum('ij,ijk,ik->i', target_states, dm, target_states)
 
 
-def sgd_optimization(learning_rate=0.13, n_epochs=100,
+def load_network_from_file(infile):
+    """Returns a QubitNetwork object created from the file `infile`.
+
+    The QubitNetwork objects should have been stored into the file in
+    pickle format, using the appropriate `save_to_file` method.
+    """
+    import pickle
+    with open(infile, 'rb') as file:
+        data = pickle.load(file)
+    net = QubitNetwork(
+        num_qubits=data['num_qubits'],
+        interactions=data['active_Js'],
+        self_interactions=data['active_hs'],
+        system_qubits=data['num_system_qubits'],
+        J=data['J']
+    )
+    return net
+
+
+def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100):
 
     print('Building the model...')
 
-    net = QubitNetwork(num_qubits=4,
-                       interactions=('all', ['zz']),
-                       self_interactions=('all', ['x', 'y', 'z']),
-                       system_qubits=[0, 1, 2])
+    if net is None:
+        net = QubitNetwork(num_qubits=4,
+                           interactions=('all', ['xx', 'yy', 'zz']),
+                           self_interactions=('all', ['x', 'y', 'z']),
+                           system_qubits=[0, 1, 2])
+    elif type(net) == QubitNetwork:
+        # everything fine, move along
+        pass
+    elif isinstance(net, str):
+        # assume `net` is the path where the network was stored
+        net = load_network_from_file(net)
 
     # Generate training dataset. In this case the target unitary is
     # fixed to be a Fredkin gate.
@@ -372,7 +424,7 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
         np.asarray(dataset[1], dtype=theano.config.floatX)
     )
 
-    test_dataset = net.generate_training_data(fredkin_gate, 100)
+    test_dataset = net.generate_training_data(fredkin_gate, 1000)
     test_states = theano.shared(
         np.asarray(test_dataset[0], dtype=theano.config.floatX)
     )
@@ -419,22 +471,27 @@ def sgd_optimization(learning_rate=0.13, n_epochs=100,
             y: test_target_states
         }
     )
-    grad = theano.function(
-        inputs=[index],
-        outputs=g_J,
-        givens={
-            x: states[index * batch_size: (index + 1) * batch_size],
-            y: target_states[index * batch_size: (index + 1) * batch_size]
-        }
-    )
-    theano.printing.pydotprint(train_model, outfile='train_model.png',
-                               var_with_name_simple=True)
+    # grad = theano.function(
+    #     inputs=[index],
+    #     outputs=g_J,
+    #     givens={
+    #         x: states[index * batch_size: (index + 1) * batch_size],
+    #         y: target_states[index * batch_size: (index + 1) * batch_size]
+    #     }
+    # )
+    # theano.printing.pydotprint(train_model, outfile='train_model.png',
+    #                            var_with_name_simple=True)
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
-    for idx in range(100):
+    # debug_idx = 0
+    for idx in range(n_epochs):
         print('Epoch {}, '.format(idx), end='')
         for minibatch_index in range(n_train_batches):
+            # debug_idx += 1
+            # print(debug_idx)
             minibatch_avg_cost = train_model(minibatch_index)
-            print('gradient: {}'.format(grad(minibatch_index)))
+            # print('gradient: {}'.format(grad(minibatch_index)))
             # print('minibatch avg cost: {}'.format(minibatch_avg_cost))
         print(test_model())
+    print('Finished training')
+    net.save_to_file('net_on_training.pickle')
