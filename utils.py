@@ -21,9 +21,23 @@ def complex2bigreal(matrix):
     [[Ur, -Ui], [Ui, Ur]], where Ur and Ui are the real and imaginary
     parts of U.
     """
-    row1 = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
-    row2 = np.concatenate((np.imag(matrix), np.real(matrix)), axis=1)
-    return np.concatenate((row1, row2), axis=0)
+    # if `matrix` is actually a qutip ket...
+    if isinstance(matrix, qutip.Qobj) and matrix.shape[1] == 1:
+        matrix = matrix.data.toarray()
+        matrix = np.concatenate((np.real(matrix), np.imag(matrix)), axis=0)
+        return matrix
+    else:
+        matrix = np.asarray(matrix)
+        row1 = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
+        row2 = np.concatenate((np.imag(matrix), np.real(matrix)), axis=1)
+        return np.concatenate((row1, row2), axis=0)
+
+
+def bigreal2complex(matrix):
+    matrix = np.asarray(matrix)
+    real_part = matrix[:matrix.shape[0] // 2, :matrix.shape[1] // 2]
+    imag_part = matrix[matrix.shape[0] // 2:, :matrix.shape[1] // 2]
+    return real_part + 1j * imag_part
 
 
 def get_sigmas_index(indices):

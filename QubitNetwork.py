@@ -1,5 +1,6 @@
 import itertools
 from collections import OrderedDict
+import os
 import qutip
 import numpy as np
 import theano
@@ -10,9 +11,10 @@ from utils import chars2pair, complex2bigreal
 
 
 class QubitNetwork:
-    def __init__(self, num_qubits,
+    def __init__(self, num_qubits, system_qubits=None,
                  interactions='all', self_interactions='all',
-                 system_qubits=None,
+                 ancillas_state=None,
+                 net_topology=None,
                  J=None):
         # *self.num_qubits* is the TOTAL number of qubits in the network,
         # regardless of them being system or ancilla qubits
@@ -48,11 +50,11 @@ class QubitNetwork:
         # that will have to multiplied by the *Js* and *hs* factors
         self.Js_factors, self.hs_factors = self.build_H_components()
 
-        # the initial state is here build in big real form, with all
-        # the qubits initialized in the up position
-        # (self.initial_state,
-        #  self.initial_system_state) = self.build_initial_state_vector()
-        self.ancillas_state = self.build_ancilla_state()
+        # Build the initial state of the ancillas
+        if ancillas_state is None:
+            self.ancillas_state = self.build_ancilla_state()
+        else:
+            self.ancillas_state = ancillas_state
 
         # self.J is the set of parameters that we want to train
         if J is None:
@@ -69,12 +71,28 @@ class QubitNetwork:
                 borrow=True
             )
 
+        self.net_topology = net_topology
+
     def decode_interactions(self, interactions):
         """Returns an OrderedDict with the requested interactions.
 
-        The output of decode_interactions is passed to self.active_Js,
-        and is meant to represent all the interactions that are switched
-        on in the created qubit network.
+        The output of `decode_interactions` is passed to `self.active_Js`, and
+        is meant to represent all the interactions that are switched on in the
+        created qubit network.
+
+        Parameters
+        ----------
+        interactions: used to specify the active interactions.
+            - 'all': all possible pairwise interactions are active.
+            - ('all', directions): for each pair of qubits the active
+                interactions are all and only those specified in `directions`.
+            - {pair1: dir1, pair2: dir2, ...}: explicitly specify all the
+                active interactions.
+
+        Returns
+        -------
+        An OrderedDict with the specified interactions formatted in a standard
+        form.
         """
         if interactions == 'all':
             allsigmas = [item[0] + item[1]
@@ -146,18 +164,23 @@ class QubitNetwork:
 
         sigmas = [qutip.qeye(2),
                   qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
-        # start by building pairwise interactions terms, filling Js_factors
+
+        # start by building pairwise interactions terms, filling
+        # `Js_factors`. The order of the elements in the `Js_factors`
+        # array is defined by the content of `self.active_Js`.
         for pair, directions in self.active_Js.items():
             # - *pair* is a pair of qubit indices, e.g. (0, 2)
             # - *directions* is a list of elements like ss below
             # - *ss* is a two-character string specifying an interaction
             # direction, e.g. 'xx' or 'xy' or 'zy'
             for ss in directions:
-                term = terms_template
+                term = terms_template[:]
                 term[pair[0]] = sigmas[chars2pair(ss)[0]]
                 term[pair[1]] = sigmas[chars2pair(ss)[1]]
-                term = complex2bigreal(1j * qutip.tensor(term).data.toarray())
+                term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
                 Js_factors.append(term)
+
+        # print(terms_template)
 
         # proceed building self-interaction terms, filling hs_factors
         for qubit_idx, direction in self.active_hs.items():
@@ -166,9 +189,11 @@ class QubitNetwork:
             if not isinstance(direction, list):
                 raise TypeError('`direction` must be a list.')
             for s in direction:
-                term = terms_template
+                term = terms_template[:]
                 term[qubit_idx] = sigmas[chars2pair(s)[0]]
-                term = complex2bigreal(1j * qutip.tensor(term).data.toarray())
+                # print('qubit {}, dir {}, matrix:\n{}'.format(
+                #     qubit_idx, s, qutip.tensor(term)))
+                term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
                 hs_factors.append(term)
 
         return np.asarray(Js_factors), np.asarray(hs_factors)
@@ -187,15 +212,13 @@ class QubitNetwork:
         return state, system_state
 
     def build_ancilla_state(self):
-        """Returns an initial ancilla state.
+        """Returns an initial ancilla state, as a qutip.Qobj object.
 
         The generated state has every ancillary qubit in the up position.
         """
         state = qutip.tensor([qutip.basis(2, 0)
                               for _ in range(self.num_ancillas)])
-        state = state.data.toarray()
-        state = np.concatenate((np.real(state), np.imag(state)), axis=0)
-        return state.reshape(state.shape[0])
+        return state
 
     def generate_training_data(self, target_unitary, size):
         """Generates a set of training data for the QubitNetwork net.
@@ -216,42 +239,28 @@ class QubitNetwork:
                        corresponding training_state through the matrix
                        target_unitary.
         """
-        vectors_size = 2 * 2 ** self.num_system_qubits
-        # generate a number *size* of normalized vectors, each one of
-        # length *vectors_size*.
-        training_states = np.random.randn(size, vectors_size)
-        norms = np.sqrt(
-            np.einsum('ij,ij->i', training_states, training_states))
-        training_states /= norms[:, np.newaxis]
 
-        # make sure that *target_unitary* is a numpy array
-        target_unitary = np.asarray(target_unitary)
-        # make sure that *target_unitary* has the correct size
-        if not target_unitary.shape[0] == vectors_size:
-            raise ValueError('Wrong dimensions for target_unitary.')
-        target_states = np.dot(training_states, target_unitary)
+        system_size = 2 ** self.num_system_qubits
+
+        # generate a number `size` of normalized vectors, each one of
+        # length `self.num_system_qubits`.
+        training_states = [qutip.rand_ket(system_size) for _ in range(size)]
+        qutip_dims = [[2 for _ in range(self.num_system_qubits)],
+                      [1 for _ in range(self.num_system_qubits)]]
+        for idx in range(len(training_states)):
+            training_states[idx].dims = qutip_dims
+
+        # evolve all training states
+        target_states = [target_unitary * psi for psi in training_states]
 
         # now compute the tensor product between every element of
-        # *target_states* and the ancilla state. Note that this is not
-        # done in the usual way due to the use of the big real form.
+        # `target_states` and the ancilla state. Note that this is not
+        training_states = [qutip.tensor(psi, self.ancillas_state)
+                           for psi in training_states]
 
-        # ---------------------- WARNING ---------------------------
-
-        # THE FOLLOWING COMPUTATION ASSUMES A REAL VECTOR FOR THE ANCILLA
-        # STATE, AND A SINGLE ANCILLA QUBIT
-
-        # ---------------------- WARNING ---------------------------
-        training_states = training_states.reshape(
-            training_states.shape[0],
-            2,
-            training_states.shape[1] // 2
-        )
-        training_states = np.einsum('kij,l->kilj',
-                                    training_states,
-                                    self.ancillas_state[:2])
-        training_states = training_states.reshape(
-            training_states.shape[0], 2 * vectors_size
-        )
+        # convert all the computed states in big real form
+        training_states = [complex2bigreal(psi) for psi in training_states]
+        target_states = [complex2bigreal(psi) for psi in target_states]
 
         return training_states, target_states
 
@@ -264,8 +273,139 @@ class QubitNetwork:
             'active_Js': self.active_Js,
             'J': self.J.get_value()
         }
+        if not os.path.isabs(outfile):
+            outfile = os.path.join(os.path.dirname(__file__), outfile)
         with open(outfile, 'wb') as file:
             pickle.dump(data, file)
+
+    def tuple_to_xs_factor(self, pair):
+        if not isinstance(pair, tuple):
+            raise TypeError('`pair` must be a tuple.')
+
+        # if `pair` represents a self-interaction:
+        if isinstance(pair[0], int):
+            idx = 0
+            found = False
+            for qubit, dirs in self.active_hs.items():
+                if qubit == pair[0]:
+                    idx += dirs.index(pair[1])
+                    found = True
+                    break
+                else:
+                    idx += len(dirs)
+            if not found:
+                raise ValueError('The value of `pair` is invalid.')
+
+            return self.hs_factors[idx]
+        # otherwise it should represent a pairwise interaction:
+        elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
+            idx = 0
+            found = False
+            for qubits, dirs in self.active_Js.items():
+                if qubits == pair[0]:
+                    idx += dirs.index(pair[1])
+                    found = True
+                    break
+                else:
+                    idx += len(dirs)
+            if not found:
+                raise ValueError('The value of `pair` is invalid.')
+
+            return self.Js_factors[idx]
+        # otherwise fuck it
+        else:
+            raise ValueError('The first element of `pair` should be an integer'
+                             ' number representing a self-interaction, or a tu'
+                             'ple of two integer numbers, representing a pairw'
+                             'ise interaction')
+
+    def build_custom_H_factors(self):
+        if self.net_topology is None:
+            H_factors = np.concatenate(
+                (self.hs_factors, self.Js_factors), axis=0)
+            return T.tensordot(self.J, H_factors, axes=1)
+        else:
+            # the expected form of `self.net_topology` is a dictionary like
+            # the following:
+            # {
+            #   ((1, 2), 'xx'): 'a',
+            #   ((1, 3), 'xx'): 'a',
+            #   ((2, 3), 'xx'): 'a',
+            #   ((1, 2), 'xy'): 'b',
+            # }
+            symbols = []
+            for symb in self.net_topology.values():
+                if symb not in symbols:
+                    symbols.append(str(symb))
+            symbols.sort()
+            print('symbols: {}'.format(symbols))
+
+            factors = []
+            for symb in symbols:
+                factors.append(np.zeros_like(self.hs_factors[0]))
+                for pair, label in self.net_topology.items():
+                    if str(label) == symb:
+                        factors[-1] += self.tuple_to_xs_factor(pair)
+            return T.tensordot(self.J, factors, axes=1)
+
+    def fidelity_1s(self, state, target_state):
+        # this builds the Hamiltonian of the system (in big real matrix
+        # form), already multiplied with the 1j factor and ready for
+        # exponentiation.
+        H = self.build_custom_H_factors()
+        # expH is the unitary evolution of the system
+        expH = T.slinalg.expm(H)
+
+        # expH_times_state is the full output state given by the qubit
+        # network.
+        # *state* in general is a matrix (array of state vectors) so
+        # that *expH_times_state* is also a matrix with a number of
+        # rows equal to the number of training vectors.
+        expHxstate = T.dot(expH, state).reshape((state.shape[0], 1))
+
+        dm = T.dot(expHxstate, expHxstate.T)
+        dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
+        dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
+
+        # *col_fn* and *row_fn* are used inside *build_density_matrices*
+        # to compute the partial traces
+        def col_fn(col_idx, row_idx, matrix):
+            subm_dim = 2 ** self.num_ancillas
+            return T.nlinalg.trace(
+                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
+                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
+
+        def row_fn(row_idx, matrix):
+            results, _ = theano.scan(
+                fn=col_fn,
+                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
+                non_sequences=[row_idx, matrix]
+            )
+            return results
+
+        dm_real_traced, _ = theano.scan(
+            fn=row_fn,
+            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
+            non_sequences=[dm_real]
+        )
+        dm_imag_traced, _ = theano.scan(
+            fn=row_fn,
+            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
+            non_sequences=[dm_imag]
+        )
+        dm_traced_r1 = T.concatenate(
+            (dm_real_traced, -dm_imag_traced),
+            axis=1
+        )
+        dm_traced_r2 = T.concatenate(
+            (dm_imag_traced, dm_real_traced),
+            axis=1
+        )
+        dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
+
+        fid = T.dot(target_state, T.dot(dm_traced, target_state))
+
+        return fid
 
     def fidelity(self, states, target_states):
         """This is the cost function of the model.
@@ -289,12 +429,9 @@ class QubitNetwork:
         A theano function, to be used for the MSGD algorithm
         """
 
-        # self.hs_factors and self.Js_factors are already in big real
-        # matrix form, and already multiplied by 1j
-        H_factors = np.concatenate((self.hs_factors, self.Js_factors), axis=0)
         # this builds the Hamiltonian of the system (in big real matrix form),
         # already multiplied with the 1j factor and ready for exponentiation
-        H = T.tensordot(self.J, H_factors, axes=1)
+        H = self.build_custom_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 
@@ -303,9 +440,9 @@ class QubitNetwork:
         # *state* in general is a matrix (array of state vectors) so
         # that *expH_times_state* is also a matrix with a number of
         # rows equal to the number of training vectors.
-        expH_times_state = T.tensordot(states, expH, axes=([1], [0]))
+        expH_times_state = T.tensordot(expH, states, axes=([1], [1])).T
 
-        # *col_fn* and *row_fn* are used inside *build_density_matrices*
+        # `col_fn` and `row_fn` are used inside `build_density_matrices`
         # to compute the partial traces
         def col_fn(col_idx, row_idx, matrix):
             subm_dim = 2 ** self.num_ancillas
@@ -332,8 +469,8 @@ class QubitNetwork:
                 matrix[i].reshape((matrix[i].shape[0], 1)),
                 matrix[i].reshape((1, matrix[i].shape[0]))
             )
-            dm_real = dm[0:dm.shape[0] // 2, 0:dm.shape[1] // 2]
-            dm_imag = dm[0:dm.shape[0] // 2, dm.shape[1] // 2:]
+            dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
+            dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
             dm_real_traced, _ = theano.scan(
                 fn=row_fn,
                 sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
@@ -353,10 +490,15 @@ class QubitNetwork:
                 axis=1
             )
             dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-            return T.dot(
-                target_states[i],
-                T.dot(dm_traced, target_states[i])
+            # return T.dot(
+            #     target_states[i],
+            #     T.dot(dm_traced, target_states[i])
+            # )
+            target_rho = T.dot(
+                target_states[i].reshape((target_states[i].shape[0], 1)),
+                target_states[i].reshape((1, target_states[i].shape[0]))
             )
+            return T.nlinalg.trace(T.dot(dm_traced, target_rho))
 
         fidelities, _ = theano.scan(
             fn=compute_fidelities,
@@ -395,9 +537,10 @@ def load_network_from_file(infile):
 
 
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
-                     batch_size=100):
-
-    print('Building the model...')
+                     batch_size=100, backup_file=None,
+                     training_dataset_size=1000,
+                     test_dataset_size=1000,
+                     target_gate=None):
 
     if net is None:
         net = QubitNetwork(num_qubits=4,
@@ -410,13 +553,36 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         net = load_network_from_file(net)
+    else:
+        raise ValueError('Invalid value for the argument `net`.')
 
+    if isinstance(backup_file, str):
+        # we will assume that it is the path where to backup the net
+        # BEFORE the training takes place, in case anything bad happens
+        net.save_to_file(backup_file)
+        print('Network backup saved in {}'.format(backup_file))
+
+    print('Building the model...')
     # Generate training dataset. In this case the target unitary is
     # fixed to be a Fredkin gate.
 
-    fredkin_gate = qutip.qip.fredkin().data.toarray()
-    fredkin_gate = complex2bigreal(fredkin_gate)
-    dataset = net.generate_training_data(fredkin_gate, 1000)
+    if target_gate is None:
+        raise ValueError('A target gate must be provided.')
+    else:
+        if isinstance(target_gate, qutip.Qobj):
+            target_gate = target_gate.data.toarray()
+            target_gate = complex2bigreal(target_gate)
+        # if `target_gate` is in regular complex form convert it in
+        # big real form:
+        elif len(target_gate) == 2 ** net.num_system_qubits:
+            target_gate = complex2bigreal(target_gate)
+        # if `target_gate` is in big real form nothing is to be done
+        elif len(target_gate) == 2 * 2 ** net.num_system_qubits:
+            pass
+        else:
+            raise ValueError('The value of `target_gate` is invalid.')
+
+    dataset = net.generate_training_data(target_gate, 1000)
     states = theano.shared(
         np.asarray(dataset[0], dtype=theano.config.floatX)
     )
@@ -424,7 +590,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         np.asarray(dataset[1], dtype=theano.config.floatX)
     )
 
-    test_dataset = net.generate_training_data(fredkin_gate, 1000)
+    test_dataset = net.generate_training_data(target_gate, 1000)
     test_states = theano.shared(
         np.asarray(test_dataset[0], dtype=theano.config.floatX)
     )
