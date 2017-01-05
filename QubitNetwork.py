@@ -58,13 +58,28 @@ class QubitNetwork:
 
         # self.J is the set of parameters that we want to train
         if J is None:
-            self.J = theano.shared(
-                value=np.random.randn(
-                    self.num_interactions + self.num_self_interactions),
-                name='J',
-                borrow=True
-            )
+            if net_topology is None:
+                self.J = theano.shared(
+                    value=np.random.randn(
+                        self.num_interactions + self.num_self_interactions),
+                    name='J',
+                    borrow=True
+                )
+            else:
+                num_symbols = len(set(s for s in net_topology.values()))
+                self.J = theano.shared(
+                    value=np.random.randn(num_symbols),
+                    name='J',
+                    borrow=True
+                )
         else:
+            # if a `net_topology` has been given, check consistency
+            if net_topology is not None:
+                num_symbols = len(set(s for s in net_topology.values()))
+                if np.asarray(J).shape[0] != num_symbols:
+                    raise ValueError('The number of specified parameters does '
+                                     'is not consistent with the value of `net'
+                                     '_topology`.')
             self.J = theano.shared(
                 value=np.asarray(J),
                 name='J',
@@ -251,6 +266,9 @@ class QubitNetwork:
             training_states[idx].dims = qutip_dims
 
         # evolve all training states
+        if not isinstance(target_unitary, qutip.Qobj):
+            raise TypeError('`target_unitary` should be a qutip object.')
+
         target_states = [target_unitary * psi for psi in training_states]
 
         # now compute the tensor product between every element of
@@ -262,7 +280,7 @@ class QubitNetwork:
         training_states = [complex2bigreal(psi) for psi in training_states]
         target_states = [complex2bigreal(psi) for psi in target_states]
 
-        return training_states, target_states
+        return np.asarray(training_states), np.asarray(target_states)
 
     def save_to_file(self, outfile):
         import pickle
@@ -338,7 +356,6 @@ class QubitNetwork:
                 if symb not in symbols:
                     symbols.append(str(symb))
             symbols.sort()
-            print('symbols: {}'.format(symbols))
 
             factors = []
             for symb in symbols:
@@ -355,17 +372,11 @@ class QubitNetwork:
         H = self.build_custom_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
-
-        # expH_times_state is the full output state given by the qubit
-        # network.
-        # *state* in general is a matrix (array of state vectors) so
-        # that *expH_times_state* is also a matrix with a number of
-        # rows equal to the number of training vectors.
-        expHxstate = T.dot(expH, state).reshape((state.shape[0], 1))
-
-        dm = T.dot(expHxstate, expHxstate.T)
-        dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
-        dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
+        Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
+        Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
+        Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
+        dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
+        dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
 
         # *col_fn* and *row_fn* are used inside *build_density_matrices*
         # to compute the partial traces
@@ -407,6 +418,56 @@ class QubitNetwork:
 
         return fid
 
+    def test_compiled_dm(self, state):
+        H = self.build_custom_H_factors()
+        expH = T.slinalg.expm(H)
+        Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
+        Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
+        Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
+        dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
+        dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
+        # dm = T.dot(expHxstate, expHxstate.T)
+        # dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
+        # dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
+
+        # *col_fn* and *row_fn* are used inside *build_density_matrices*
+        # to compute the partial traces
+        def col_fn(col_idx, row_idx, matrix):
+            subm_dim = 2 ** self.num_ancillas
+            return T.nlinalg.trace(
+                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
+                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
+
+        def row_fn(row_idx, matrix):
+            results, _ = theano.scan(
+                fn=col_fn,
+                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
+                non_sequences=[row_idx, matrix]
+            )
+            return results
+
+        dm_real_traced, _ = theano.scan(
+            fn=row_fn,
+            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
+            non_sequences=[dm_real]
+        )
+        dm_imag_traced, _ = theano.scan(
+            fn=row_fn,
+            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
+            non_sequences=[dm_imag]
+        )
+        dm_traced_r1 = T.concatenate(
+            (dm_real_traced, -dm_imag_traced),
+            axis=1
+        )
+        dm_traced_r2 = T.concatenate(
+            (dm_imag_traced, dm_real_traced),
+            axis=1
+        )
+        dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
+        return dm_traced
+        # return dm_traced
+
     def fidelity(self, states, target_states):
         """This is the cost function of the model.
 
@@ -430,7 +491,7 @@ class QubitNetwork:
         """
 
         # this builds the Hamiltonian of the system (in big real matrix form),
-        # already multiplied with the 1j factor and ready for exponentiation
+        # already multiplied with the -1j factor and ready for exponentiation
         H = self.build_custom_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
@@ -465,12 +526,14 @@ class QubitNetwork:
         # freedom. Overall *dm* will therefore be an array of such
         # density matrices.
         def compute_fidelities(i, matrix, target_states):
-            dm = T.dot(
-                matrix[i].reshape((matrix[i].shape[0], 1)),
-                matrix[i].reshape((1, matrix[i].shape[0]))
-            )
-            dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
-            dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
+            # here matrix[i] is the i-th training state after evolution
+            # through exp(-1j * H)
+            Uxpsi = matrix[i].reshape((matrix[i].shape[0], 1))
+            Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
+            Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
+            dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
+            dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
+
             dm_real_traced, _ = theano.scan(
                 fn=row_fn,
                 sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
@@ -498,23 +561,16 @@ class QubitNetwork:
                 target_states[i].reshape((target_states[i].shape[0], 1)),
                 target_states[i].reshape((1, target_states[i].shape[0]))
             )
-            return T.nlinalg.trace(T.dot(dm_traced, target_rho))
+
+            return T.abs_(T.nlinalg.trace(T.dot(dm_traced, target_rho)))
 
         fidelities, _ = theano.scan(
             fn=compute_fidelities,
             sequences=T.arange(expH_times_state.shape[0]),
             non_sequences=[expH_times_state, target_states]
         )
+
         return T.mean(fidelities)
-
-        # target_u = complex2bigreal(qutip.qip.fredkin().data.toarray())
-        # target_state = T.dot(target_unitary, state)
-        # fidelity = target_evolved_state.T.dot(target_u.dot(
-        # target_evolved_state))
-
-        # we want to implement with theano ops the equivalent of the
-        # following numpy.einsum call:
-        # np.einsum('ij,ijk,ik->i', target_states, dm, target_states)
 
 
 def load_network_from_file(infile):
@@ -536,10 +592,22 @@ def load_network_from_file(infile):
     return net
 
 
+def test_compiled_dm(net, state):
+    state_for_net = theano.shared(complex2bigreal(state))
+    cost = net.test_compiled_dm(state_for_net)
+
+    dm = theano.function(
+        inputs=[],
+        outputs=cost
+    )
+
+    return dm()
+
+
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100, backup_file=None,
-                     training_dataset_size=1000,
-                     test_dataset_size=1000,
+                     training_dataset_size=100,
+                     test_dataset_size=100,
                      target_gate=None):
 
     if net is None:
@@ -562,27 +630,9 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         net.save_to_file(backup_file)
         print('Network backup saved in {}'.format(backup_file))
 
-    print('Building the model...')
-    # Generate training dataset. In this case the target unitary is
-    # fixed to be a Fredkin gate.
+    print('Generating training data...')
 
-    if target_gate is None:
-        raise ValueError('A target gate must be provided.')
-    else:
-        if isinstance(target_gate, qutip.Qobj):
-            target_gate = target_gate.data.toarray()
-            target_gate = complex2bigreal(target_gate)
-        # if `target_gate` is in regular complex form convert it in
-        # big real form:
-        elif len(target_gate) == 2 ** net.num_system_qubits:
-            target_gate = complex2bigreal(target_gate)
-        # if `target_gate` is in big real form nothing is to be done
-        elif len(target_gate) == 2 * 2 ** net.num_system_qubits:
-            pass
-        else:
-            raise ValueError('The value of `target_gate` is invalid.')
-
-    dataset = net.generate_training_data(target_gate, 1000)
+    dataset = net.generate_training_data(target_gate, training_dataset_size)
     states = theano.shared(
         np.asarray(dataset[0], dtype=theano.config.floatX)
     )
@@ -590,7 +640,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         np.asarray(dataset[1], dtype=theano.config.floatX)
     )
 
-    test_dataset = net.generate_training_data(target_gate, 1000)
+    test_dataset = net.generate_training_data(target_gate, test_dataset_size)
     test_states = theano.shared(
         np.asarray(test_dataset[0], dtype=theano.config.floatX)
     )
@@ -598,6 +648,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         np.asarray(test_dataset[1], dtype=theano.config.floatX)
     )
 
+    print('Building the model...')
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a minibatch
 

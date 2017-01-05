@@ -25,7 +25,7 @@ def complex2bigreal(matrix):
     if isinstance(matrix, qutip.Qobj) and matrix.shape[1] == 1:
         matrix = matrix.data.toarray()
         matrix = np.concatenate((np.real(matrix), np.imag(matrix)), axis=0)
-        return matrix
+        return matrix.reshape(matrix.shape[0])
     else:
         matrix = np.asarray(matrix)
         row1 = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
@@ -35,9 +35,14 @@ def complex2bigreal(matrix):
 
 def bigreal2complex(matrix):
     matrix = np.asarray(matrix)
-    real_part = matrix[:matrix.shape[0] // 2, :matrix.shape[1] // 2]
-    imag_part = matrix[matrix.shape[0] // 2:, :matrix.shape[1] // 2]
-    return real_part + 1j * imag_part
+    if len(matrix.shape) == 2 and matrix.shape[0] == matrix.shape[1]:
+        real_part = matrix[:matrix.shape[0] // 2, :matrix.shape[1] // 2]
+        imag_part = matrix[matrix.shape[0] // 2:, :matrix.shape[1] // 2]
+        return real_part + 1j * imag_part
+    elif len(matrix.shape) == 1:
+        real_part = matrix[:matrix.shape[0] // 2]
+        imag_part = matrix[matrix.shape[0] // 2:]
+        return real_part + 1j * imag_part
 
 
 def get_sigmas_index(indices):
