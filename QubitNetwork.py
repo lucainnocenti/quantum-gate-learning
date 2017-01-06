@@ -2,12 +2,14 @@ import itertools
 from collections import OrderedDict
 import os
 import qutip
+import matplotlib.pyplot as plt
+import scipy.linalg
 import numpy as np
 import theano
 import theano.tensor as T
 import theano.tensor.slinalg
 import theano.tensor.nlinalg
-from utils import chars2pair, complex2bigreal
+from utils import chars2pair, complex2bigreal, bigreal2complex
 
 
 class QubitNetwork:
@@ -365,6 +367,17 @@ class QubitNetwork:
                         factors[-1] += self.tuple_to_xs_factor(pair)
             return T.tensordot(self.J, factors, axes=1)
 
+    def get_current_gate(self):
+        """Returns the currently produced unitary, in complex form."""
+        if self.net_topology is None:
+            gate = np.concatenate((self.hs_factors, self.Js_factors), axis=0)
+            gate = np.tensordot(self.J.get_value(), gate, axes=1)
+            gate = scipy.linalg.expm(gate)
+            gate = bigreal2complex(gate)
+            return gate
+        else:
+            raise NotImplementedError()
+
     def fidelity_1s(self, state, target_state):
         # this builds the Hamiltonian of the system (in big real matrix
         # form), already multiplied with the 1j factor and ready for
@@ -544,25 +557,47 @@ class QubitNetwork:
                 sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
                 non_sequences=[dm_imag]
             )
-            dm_traced_r1 = T.concatenate(
-                (dm_real_traced, -dm_imag_traced),
-                axis=1
-            )
-            dm_traced_r2 = T.concatenate(
-                (dm_imag_traced, dm_real_traced),
-                axis=1
-            )
-            dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-            # return T.dot(
-            #     target_states[i],
-            #     T.dot(dm_traced, target_states[i])
+            # dm_traced_r1 = T.concatenate(
+            #     (dm_real_traced, -dm_imag_traced),
+            #     axis=1
             # )
-            target_rho = T.dot(
-                target_states[i].reshape((target_states[i].shape[0], 1)),
-                target_states[i].reshape((1, target_states[i].shape[0]))
-            )
+            # dm_traced_r2 = T.concatenate(
+            #     (dm_imag_traced, dm_real_traced),
+            #     axis=1
+            # )
+            # dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
 
-            return T.abs_(T.nlinalg.trace(T.dot(dm_traced, target_rho)))
+            target_state = target_states[i]
+            target_state_real = target_state[:target_state.shape[0] // 2, None]
+            target_state_imag = target_state[target_state.shape[0] // 2:, None]
+            target_dm_real = (target_state_real * target_state_real.T +
+                              target_state_imag * target_state_imag.T)
+            target_dm_imag = (target_state_imag * target_state_real.T -
+                              target_state_real * target_state_imag.T)
+
+            # target_dm_r1 = T.concatenate(
+            #     (target_dm_real, -target_dm_imag),
+            #     axis=1
+            # )
+            # target_dm_r2 = T.concatenate(
+            #     (target_dm_imag, -target_dm_real),
+            #     axis=1
+            # )
+            # target_dm = T.concatenate((target_dm_r1, target_dm_r2), axis=0)
+            prod_real = (T.dot(dm_real_traced, target_dm_real) -
+                         T.dot(dm_imag_traced, target_dm_imag))
+            tr_real = T.nlinalg.trace(prod_real)
+
+            # prod_imag = (T.dot(dm_real_traced, target_dm_imag) +
+            #              T.dot(dm_imag_traced, target_dm_real))
+            # tr_imag = T.nlinalg.trace(prod_imag)
+
+            # tr_abs = T.sqrt(tr_real ** 2 + tr_imag ** 2)
+
+            # guess we should show why this is correct?
+            return tr_real
+
+            # return tr_abs
 
         fidelities, _ = theano.scan(
             fn=compute_fidelities,
@@ -570,6 +605,7 @@ class QubitNetwork:
             non_sequences=[expH_times_state, target_states]
         )
 
+        # return fidelities
         return T.mean(fidelities)
 
 
@@ -606,33 +642,40 @@ def test_compiled_dm(net, state):
 
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100, backup_file=None,
-                     training_dataset_size=100,
-                     test_dataset_size=100,
-                     target_gate=None):
+                     training_dataset_size=1000,
+                     test_dataset_size=1000,
+                     target_gate=None,
+                     decay_rate=0.1):
 
+    # parse the `net` parameter
     if net is None:
-        net = QubitNetwork(num_qubits=4,
-                           interactions=('all', ['xx', 'yy', 'zz']),
-                           self_interactions=('all', ['x', 'y', 'z']),
-                           system_qubits=[0, 1, 2])
+        _net = QubitNetwork(num_qubits=4,
+                            interactions=('all', ['xx', 'yy', 'zz']),
+                            self_interactions=('all', ['x', 'y', 'z']),
+                            system_qubits=[0, 1, 2])
     elif type(net) == QubitNetwork:
         # everything fine, move along
-        pass
+        _net = net
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
-        net = load_network_from_file(net)
+        _net = load_network_from_file(net)
     else:
         raise ValueError('Invalid value for the argument `net`.')
 
+    # parse `target_gate` parameter
+    if target_gate is None:
+        raise ValueError('`target_gate` must have a value.')
+
+    # parse `backup_file` parameter
     if isinstance(backup_file, str):
         # we will assume that it is the path where to backup the net
         # BEFORE the training takes place, in case anything bad happens
-        net.save_to_file(backup_file)
+        _net.save_to_file(backup_file)
         print('Network backup saved in {}'.format(backup_file))
 
     print('Generating training data...')
 
-    dataset = net.generate_training_data(target_gate, training_dataset_size)
+    dataset = _net.generate_training_data(target_gate, training_dataset_size)
     states = theano.shared(
         np.asarray(dataset[0], dtype=theano.config.floatX)
     )
@@ -640,7 +683,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         np.asarray(dataset[1], dtype=theano.config.floatX)
     )
 
-    test_dataset = net.generate_training_data(target_gate, test_dataset_size)
+    test_dataset = _net.generate_training_data(target_gate, test_dataset_size)
     test_states = theano.shared(
         np.asarray(test_dataset[0], dtype=theano.config.floatX)
     )
@@ -655,16 +698,22 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # generate symbolic variables for input data and labels
     x = T.dmatrix('x')  # input state (data). Every row is a state vector
     y = T.dmatrix('y')  # output target state (label). As above
+
+    _learning_rate = theano.shared(
+        np.asarray(learning_rate, dtype=theano.config.floatX),
+        name='learning_rate'
+    )
+
     # define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
-    cost = net.fidelity(x, y)
+    cost = _net.fidelity(x, y)
 
     # compute the gradient of the cost
-    g_J = T.grad(cost=cost, wrt=net.J)
+    g_J = T.grad(cost=cost, wrt=_net.J)
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
-    updates = [(net.J, net.J + learning_rate * g_J)]
+    updates = [(_net.J, _net.J + _learning_rate * g_J)]
 
     # compile the training function `train_model`, that while computing
     # the cost at every iteration (batch), also updates the weights of
@@ -700,15 +749,25 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     #                            var_with_name_simple=True)
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
-    # debug_idx = 0
-    for idx in range(n_epochs):
-        print('Epoch {}, '.format(idx), end='')
+    fids_history = []
+    fig, ax = plt.subplots(1, 1)
+
+    for n_epoch in range(n_epochs):
+        print('Epoch {}, '.format(n_epoch), end='')
+
         for minibatch_index in range(n_train_batches):
-            # debug_idx += 1
-            # print(debug_idx)
             minibatch_avg_cost = train_model(minibatch_index)
-            # print('gradient: {}'.format(grad(minibatch_index)))
-            # print('minibatch avg cost: {}'.format(minibatch_avg_cost))
-        print(test_model())
+
+        fids_history.append(test_model())
+        print(fids_history[-1])
+        ax.plot(fids_history, '-b')
+        fig.canvas.draw()
+        # if fids_history[-1] < fids_history[-2]:
+        _learning_rate.set_value(learning_rate / (1 + decay_rate * n_epoch))
+        # print('new learning rate: {}'.format(learning_rate.get_value()))
+
     print('Finished training')
-    net.save_to_file('net_on_training.pickle')
+    if isinstance(net, str):
+        _net.save_to_file(net)
+        print('Network saved in {}'.format(net))
+    return _net
