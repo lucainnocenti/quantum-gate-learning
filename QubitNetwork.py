@@ -118,7 +118,7 @@ class QubitNetwork:
             return OrderedDict([(pair, allsigmas) for pair in self.pairs])
         elif isinstance(interactions, tuple):
             if interactions[0] == 'all':
-                d = {pair: interactions[1] for pair in self.pairs}
+                d = [(pair, interactions[1]) for pair in self.pairs]
                 return OrderedDict(d)
         elif (isinstance(interactions, dict) and
               all(isinstance(k, tuple) for k in interactions.keys())):
@@ -129,11 +129,11 @@ class QubitNetwork:
     def decode_self_interactions(self, self_interactions):
         if self_interactions == 'all':
             return OrderedDict(
-                {idx: ['x', 'y', 'z'] for idx in range(self.num_qubits)})
+                [(idx, ['x', 'y', 'z']) for idx in range(self.num_qubits)])
         elif isinstance(self_interactions, tuple):
             if self_interactions[0] == 'all':
-                d = {idx: self_interactions[1]
-                     for idx in range(self.num_qubits)}
+                d = [(idx, self_interactions[1])
+                     for idx in range(self.num_qubits)]
                 return OrderedDict(d)
             else:
                 raise ValueError('Invalid value for self_interactions.')
@@ -366,6 +366,31 @@ class QubitNetwork:
                     if str(label) == symb:
                         factors[-1] += self.tuple_to_xs_factor(pair)
             return T.tensordot(self.J, factors, axes=1)
+
+    def J_index_to_interaction(self, index):
+        if self.net_topology is None:
+            # if the index represents a self interaction...
+            if 0 <= index < self.num_self_interactions:
+                count = 0
+                for qb, dirs in self.active_hs.items():
+                    if index < count + len(dirs):
+                        # index points to a dir of this qubit
+                        return (qb, dirs[index - count])
+                    else:
+                        count += len(dirs)
+            # if the index represents a pairwise interaction...
+            elif index < self.num_self_interactions + self.num_interactions:
+                index = index - self.num_self_interactions
+                count = 0
+                for pair, dirs in self.active_Js.items():
+                    if index < count + len(dirs):
+                        return (pair, dirs[index - count])
+                    else:
+                        count += len(dirs)
+            else:
+                raise ValueError('`index` has an invalid value.')
+        else:
+            raise NotImplementedError()
 
     def get_current_gate(self):
         """Returns the currently produced unitary, in complex form."""
@@ -641,11 +666,15 @@ def test_compiled_dm(net, state):
 
 
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
-                     batch_size=100, backup_file=None,
+                     batch_size=100,
+                     backup_file=None,
+                     saveafter_file=None,
                      training_dataset_size=1000,
                      test_dataset_size=1000,
                      target_gate=None,
-                     decay_rate=0.1):
+                     decay_rate=0.1,
+                     precompiled_functions=None,
+                     print_fidelity=False):
 
     # parse the `net` parameter
     if net is None:
@@ -715,59 +744,71 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # (variable, update expression) pairs
     updates = [(_net.J, _net.J + _learning_rate * g_J)]
 
-    # compile the training function `train_model`, that while computing
-    # the cost at every iteration (batch), also updates the weights of
-    # the network based on the rules defined in `updates`.
-    train_model = theano.function(
-        inputs=[index],
-        outputs=cost,
-        updates=updates,
-        givens={
-            x: states[index * batch_size: (index + 1) * batch_size],
-            y: target_states[index * batch_size: (index + 1) * batch_size]
-        }
-    )
+    if precompiled_functions is None:
+        # compile the training function `train_model`, that while computing
+        # the cost at every iteration (batch), also updates the weights of
+        # the network based on the rules defined in `updates`.
+        train_model = theano.function(
+            inputs=[index],
+            outputs=cost,
+            updates=updates,
+            givens={
+                x: states[index * batch_size: (index + 1) * batch_size],
+                y: target_states[index * batch_size: (index + 1) * batch_size]
+            }
+        )
 
-    test_model = theano.function(
-        inputs=[],
-        outputs=cost,
-        updates=None,
-        givens={
-            x: test_states,
-            y: test_target_states
-        }
-    )
-    # grad = theano.function(
-    #     inputs=[index],
-    #     outputs=g_J,
-    #     givens={
-    #         x: states[index * batch_size: (index + 1) * batch_size],
-    #         y: target_states[index * batch_size: (index + 1) * batch_size]
-    #     }
-    # )
-    # theano.printing.pydotprint(train_model, outfile='train_model.png',
-    #                            var_with_name_simple=True)
+        test_model = theano.function(
+            inputs=[],
+            outputs=cost,
+            updates=None,
+            givens={
+                x: test_states,
+                y: test_target_states
+            }
+        )
+    else:
+        train_model, test_model = precompiled_functions
+
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
     fids_history = []
     fig, ax = plt.subplots(1, 1)
 
     for n_epoch in range(n_epochs):
-        print('Epoch {}, '.format(n_epoch), end='')
+        if print_fidelity:
+            print('Epoch {}, '.format(n_epoch), end='')
 
         for minibatch_index in range(n_train_batches):
             minibatch_avg_cost = train_model(minibatch_index)
 
+        # update fidelity history
         fids_history.append(test_model())
-        print(fids_history[-1])
+        if print_fidelity:
+            print(fids_history[-1])
+
+        # update plot
         ax.plot(fids_history, '-b')
+        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+            _learning_rate.get_value(), fids_history[-1]))
         fig.canvas.draw()
-        # if fids_history[-1] < fids_history[-2]:
+
+        # update learning rate
         _learning_rate.set_value(learning_rate / (1 + decay_rate * n_epoch))
-        # print('new learning rate: {}'.format(learning_rate.get_value()))
+
+        # generate a new set of training states
+        dataset = _net.generate_training_data(
+            target_gate, training_dataset_size)
+        states.set_value(dataset[0])
+        target_states.set_value(dataset[1])
 
     print('Finished training')
+
     if isinstance(net, str):
         _net.save_to_file(net)
         print('Network saved in {}'.format(net))
-    return _net
+    elif saveafter_file is not None:
+        _net.save_to_file(saveafter_file)
+        print('Network saved in {}'.format(saveafter_file))
+
+    return _net, (train_model, test_model)
