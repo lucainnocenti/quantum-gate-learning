@@ -28,12 +28,13 @@ class QubitNetwork:
         if system_qubits is None:
             self.system_qubits = tuple(range(num_qubits // 2))
         elif (isinstance(system_qubits, list) and
-                np.all(np.asarray(system_qubits) < num_qubits)):
+                all(qb < num_qubits for qb in system_qubits)):
             self.system_qubits = tuple(system_qubits)
         elif isinstance(system_qubits, int) and system_qubits <= num_qubits:
             self.system_qubits = tuple(range(system_qubits))
         else:
             raise ValueError('Invalid value for system_qubits.')
+
         # it will still be useful in the following to have direct access
         # to the number of ancilla and system qubits
         self.num_ancillas = self.num_qubits - len(self.system_qubits)
@@ -702,6 +703,15 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         _net.save_to_file(backup_file)
         print('Network backup saved in {}'.format(backup_file))
 
+    # definition of utility functions for later on
+    def conditionally_save():
+        if isinstance(net, str):
+            _net.save_to_file(net)
+            print('Network saved in {}'.format(net))
+        elif saveafter_file is not None:
+            _net.save_to_file(saveafter_file)
+            print('Network saved in {}'.format(saveafter_file))
+
     print('Generating training data...')
 
     dataset = _net.generate_training_data(target_gate, training_dataset_size)
@@ -775,40 +785,40 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     fids_history = []
     fig, ax = plt.subplots(1, 1)
 
-    for n_epoch in range(n_epochs):
-        if print_fidelity:
-            print('Epoch {}, '.format(n_epoch), end='')
+    try:
+        for n_epoch in range(n_epochs):
+            if print_fidelity:
+                print('Epoch {}, '.format(n_epoch), end='')
 
-        for minibatch_index in range(n_train_batches):
-            minibatch_avg_cost = train_model(minibatch_index)
+            for minibatch_index in range(n_train_batches):
+                minibatch_avg_cost = train_model(minibatch_index)
 
-        # update fidelity history
-        fids_history.append(test_model())
-        if print_fidelity:
-            print(fids_history[-1])
+            # update fidelity history
+            fids_history.append(test_model())
+            if print_fidelity:
+                print(fids_history[-1])
 
-        # update plot
-        ax.plot(fids_history, '-b')
-        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
-            _learning_rate.get_value(), fids_history[-1]))
-        fig.canvas.draw()
+            # update plot
+            ax.plot(fids_history, '-b')
+            plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+                _learning_rate.get_value(), fids_history[-1]))
+            fig.canvas.draw()
 
-        # update learning rate
-        _learning_rate.set_value(learning_rate / (1 + decay_rate * n_epoch))
+            # update learning rate
+            _learning_rate.set_value(
+                learning_rate / (1 + decay_rate * n_epoch))
 
-        # generate a new set of training states
-        dataset = _net.generate_training_data(
-            target_gate, training_dataset_size)
-        states.set_value(dataset[0])
-        target_states.set_value(dataset[1])
+            # generate a new set of training states
+            dataset = _net.generate_training_data(
+                target_gate, training_dataset_size)
+            states.set_value(dataset[0])
+            target_states.set_value(dataset[1])
+    except KeyboardInterrupt:
+        pass
 
     print('Finished training')
 
-    if isinstance(net, str):
-        _net.save_to_file(net)
-        print('Network saved in {}'.format(net))
-    elif saveafter_file is not None:
-        _net.save_to_file(saveafter_file)
-        print('Network saved in {}'.format(saveafter_file))
+    # save results if appropriate parameters have been given
+    conditionally_save()
 
     return _net, (train_model, test_model)

@@ -100,3 +100,55 @@ def chars2pair(chars):
             raise ValueError('chars must contain 2 characters, each of'
                              'which equal to either x, y, or z')
     return tuple(out_pair)
+
+
+def dm2ket(dm):
+    """Converts density matrix to ket form, assuming it to be pure."""
+    outket = dm[:, 0] / dm[0, 0] * np.sqrt(np.abs(dm[0, 0]))
+    try:
+        return qutip.Qobj(outket, dims=[dm.dims[0], [1] * len(dm.dims[0])])
+    except AttributeError:
+        # `dm` could be a simple matrix, not a qutip.Qobj object. In
+        # this case just return the numpy array
+        return outket
+
+
+def ket_normalize(ket):
+    return ket * np.exp(-1j * np.angle(ket[0, 0]))
+
+
+def detensorize(bigm):
+    """Assumes second matrix is 2x2."""
+    out = np.zeros((bigm.shape[0] * bigm.shape[1], 2, 2), dtype=np.complex)
+    idx = 0
+    for row in range(bigm.shape[0] // 2):
+        for col in range(bigm.shape[1] // 2):
+            trow = 2 * row
+            tcol = 2 * col
+            foo = np.zeros([2, 2], dtype=np.complex)
+            foo = np.zeros([2, 2], dtype=np.complex)
+            foo[0, 0] = 1
+            foo[0, 1] = bigm[trow, tcol + 1] / bigm[trow, tcol]
+            foo[1, 0] = bigm[trow + 1, tcol] / bigm[trow, tcol]
+            foo[1, 1] = bigm[trow + 1, tcol + 1] / bigm[trow, tcol]
+            out[idx] = foo
+            idx += 1
+    return out
+
+
+def normalize_topleft_phase(matrix):
+    return matrix * np.exp(-1j * np.angle(matrix[0, 0]))
+
+
+def chop(arr, eps=1e-3):
+    if isinstance(arr, qutip.Qobj):
+        _arr = arr.data.toarray()
+        _arr.real[np.abs(_arr.real) < eps] = 0.0
+        _arr.imag[np.abs(_arr.imag) < eps] = 0.0
+        _arr = qutip.Qobj(_arr, dims=arr.dims)
+        return _arr
+    else:
+        arr = np.asarry(arr)
+        arr.real[np.abs(arr.real) < eps] = 0.0
+        arr.imag[np.abs(arr.imag) < eps] = 0.0
+        return arr
