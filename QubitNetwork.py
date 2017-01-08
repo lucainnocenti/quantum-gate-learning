@@ -15,16 +15,16 @@ from utils import chars2pair, complex2bigreal, bigreal2complex
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
                  interactions='all', self_interactions='all',
-                 ancillas_state=None,
+                 ancillae_state=None,
                  net_topology=None,
                  J=None):
-        # *self.num_qubits* is the TOTAL number of qubits in the network,
-        # regardless of them being system or ancilla qubits
+        # *self.num_qubits* is the TOTAL number of qubits in the
+        # network, regardless of them being system or ancilla qubits
         self.num_qubits = num_qubits
         # Define which qubits belong to the system. The others are all
-        # assumed to be ancilla qubits. If *system_qubits* was not explicitly
-        # given it is assumed that half of the qubits are the system and half
-        # are ancillas
+        # assumed to be ancilla qubits. If *system_qubits* was not
+        # explicitly given it is assumed that half of the qubits are the
+        # system and half are ancillae
         if system_qubits is None:
             self.system_qubits = tuple(range(num_qubits // 2))
         elif (isinstance(system_qubits, list) and
@@ -37,7 +37,7 @@ class QubitNetwork:
 
         # it will still be useful in the following to have direct access
         # to the number of ancilla and system qubits
-        self.num_ancillas = self.num_qubits - len(self.system_qubits)
+        self.num_ancillae = self.num_qubits - len(self.system_qubits)
         self.num_system_qubits = len(self.system_qubits)
 
         # we store all the possible pairs for convenience
@@ -53,13 +53,14 @@ class QubitNetwork:
         # that will have to multiplied by the *Js* and *hs* factors
         self.Js_factors, self.hs_factors = self.build_H_components()
 
-        # Build the initial state of the ancillas
-        if ancillas_state is None:
-            self.ancillas_state = self.build_ancilla_state()
-        else:
-            self.ancillas_state = ancillas_state
+        # Build the initial state of the ancillae, if there are any
+        if self.num_ancillae > 0:
+            if ancillae_state is None:
+                self.ancillae_state = self.build_ancilla_state()
+            else:
+                self.ancillae_state = ancillae_state
 
-        # self.J is the set of parameters that we want to train
+        # self.J is the set of parameters that we are going to train
         if J is None:
             if net_topology is None:
                 self.J = theano.shared(
@@ -69,7 +70,7 @@ class QubitNetwork:
                     borrow=True
                 )
             else:
-                num_symbols = len(set(s for s in net_topology.values()))
+                num_symbols = len(set(net_topology.values()))
                 self.J = theano.shared(
                     value=np.random.randn(num_symbols),
                     name='J',
@@ -121,9 +122,20 @@ class QubitNetwork:
             if interactions[0] == 'all':
                 d = [(pair, interactions[1]) for pair in self.pairs]
                 return OrderedDict(d)
-        elif (isinstance(interactions, dict) and
-              all(isinstance(k, tuple) for k in interactions.keys())):
-            return OrderedDict(interactions)
+        # if `interactions` is dictionary-like, then return it back,
+        # changing values that are strings (thus representing single
+        # interactions corresponding to some qubit pair) converted to
+        # lists with the single element equal to that string.
+        elif isinstance(interactions, dict):
+            parsed_interactions = OrderedDict()
+            for k, v in interactions.items():
+                if not isinstance(k, tuple):
+                    raise ValueError('All keys must be tuples.')
+                if isinstance(v, str):
+                    parsed_interactions[k] = [v]
+                else:
+                    parsed_interactions[k] = v
+            return parsed_interactions
         else:
             raise ValueError('Invalid value given for interactions.')
 
@@ -147,13 +159,19 @@ class QubitNetwork:
     def count_interactions(self):
         count = 0
         for k, v in self.active_Js.items():
-            count += len(v)
+            if isinstance(v, str):
+                count += 1
+            else:
+                count += len(v)
         return count
 
     def count_self_interactions(self):
         count = 0
         for k, v in self.active_hs.items():
-            count += len(v)
+            if isinstance(v, str):
+                count += 1
+            else:
+                count += len(v)
         return count
 
     def build_H_components(self):
@@ -216,26 +234,13 @@ class QubitNetwork:
 
         return np.asarray(Js_factors), np.asarray(hs_factors)
 
-    def build_initial_state_vector(self):
-        """Probably DEPRECATED."""
-        state = qutip.tensor([qutip.basis(2, 0)
-                              for _ in range(self.num_qubits)])
-        state = state.data.toarray()
-        state = np.concatenate((np.real(state), np.imag(state)), axis=0)
-        system_state = qutip.tensor([qutip.basis(2, 0)
-                                     for _ in range(len(self.system_qubits))])
-        system_state = system_state.data.toarray()
-        system_state = np.concatenate(
-            (np.real(system_state), np.imag(system_state)), axis=0)
-        return state, system_state
-
     def build_ancilla_state(self):
         """Returns an initial ancilla state, as a qutip.Qobj object.
 
         The generated state has every ancillary qubit in the up position.
         """
         state = qutip.tensor([qutip.basis(2, 0)
-                              for _ in range(self.num_ancillas)])
+                              for _ in range(self.num_ancillae)])
         return state
 
     def generate_training_data(self, target_unitary, size):
@@ -275,9 +280,11 @@ class QubitNetwork:
         target_states = [target_unitary * psi for psi in training_states]
 
         # now compute the tensor product between every element of
-        # `target_states` and the ancilla state. Note that this is not
-        training_states = [qutip.tensor(psi, self.ancillas_state)
-                           for psi in training_states]
+        # `target_states` and the ancillae state, IF there are ancillae
+        # over which we have to trace over after
+        if self.num_ancillae > 0:
+            training_states = [qutip.tensor(psi, self.ancillae_state)
+                               for psi in training_states]
 
         # convert all the computed states in big real form
         training_states = [complex2bigreal(psi) for psi in training_states]
@@ -299,7 +306,7 @@ class QubitNetwork:
         with open(outfile, 'wb') as file:
             pickle.dump(data, file)
 
-    def tuple_to_xs_factor(self, pair):
+    def tuple_to_xs_index(self, pair):
         if not isinstance(pair, tuple):
             raise TypeError('`pair` must be a tuple.')
 
@@ -310,14 +317,12 @@ class QubitNetwork:
             for qubit, dirs in self.active_hs.items():
                 if qubit == pair[0]:
                     idx += dirs.index(pair[1])
-                    found = True
-                    break
+                    return idx
                 else:
                     idx += len(dirs)
             if not found:
                 raise ValueError('The value of `pair` is invalid.')
 
-            return self.hs_factors[idx]
         # otherwise it should represent a pairwise interaction:
         elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
             idx = 0
@@ -325,13 +330,29 @@ class QubitNetwork:
             for qubits, dirs in self.active_Js.items():
                 if qubits == pair[0]:
                     idx += dirs.index(pair[1])
-                    found = True
-                    break
+                    return idx
                 else:
                     idx += len(dirs)
             if not found:
                 raise ValueError('The value of `pair` is invalid.')
+        # otherwise fuck it
+        else:
+            raise ValueError('The first element of `pair` should be an integer'
+                             ' number representing a self-interaction, or a tu'
+                             'ple of two integer numbers, representing a pairw'
+                             'ise interaction')
 
+    def tuple_to_xs_factor(self, pair):
+        if not isinstance(pair, tuple):
+            raise TypeError('`pair` must be a tuple.')
+
+        # if `pair` represents a self-interaction:
+        if isinstance(pair[0], int):
+            idx = self.tuple_to_xs_index(pair)
+            return self.hs_factors[idx]
+        # otherwise it should represent a pairwise interaction:
+        elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
+            idx = self.tuple_to_xs_index(pair)
             return self.Js_factors[idx]
         # otherwise fuck it
         else:
@@ -420,7 +441,7 @@ class QubitNetwork:
         # *col_fn* and *row_fn* are used inside *build_density_matrices*
         # to compute the partial traces
         def col_fn(col_idx, row_idx, matrix):
-            subm_dim = 2 ** self.num_ancillas
+            subm_dim = 2 ** self.num_ancillae
             return T.nlinalg.trace(
                 matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
                        col_idx * subm_dim:(col_idx + 1) * subm_dim])
@@ -428,19 +449,19 @@ class QubitNetwork:
         def row_fn(row_idx, matrix):
             results, _ = theano.scan(
                 fn=col_fn,
-                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
+                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillae),
                 non_sequences=[row_idx, matrix]
             )
             return results
 
         dm_real_traced, _ = theano.scan(
             fn=row_fn,
-            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
+            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillae),
             non_sequences=[dm_real]
         )
         dm_imag_traced, _ = theano.scan(
             fn=row_fn,
-            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
+            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillae),
             non_sequences=[dm_imag]
         )
         dm_traced_r1 = T.concatenate(
@@ -456,56 +477,6 @@ class QubitNetwork:
         fid = T.dot(target_state, T.dot(dm_traced, target_state))
 
         return fid
-
-    def test_compiled_dm(self, state):
-        H = self.build_custom_H_factors()
-        expH = T.slinalg.expm(H)
-        Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
-        Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
-        Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
-        dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
-        dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
-        # dm = T.dot(expHxstate, expHxstate.T)
-        # dm_real = dm[:dm.shape[0] // 2, :dm.shape[1] // 2]
-        # dm_imag = dm[dm.shape[0] // 2:, :dm.shape[1] // 2]
-
-        # *col_fn* and *row_fn* are used inside *build_density_matrices*
-        # to compute the partial traces
-        def col_fn(col_idx, row_idx, matrix):
-            subm_dim = 2 ** self.num_ancillas
-            return T.nlinalg.trace(
-                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
-                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
-
-        def row_fn(row_idx, matrix):
-            results, _ = theano.scan(
-                fn=col_fn,
-                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
-                non_sequences=[row_idx, matrix]
-            )
-            return results
-
-        dm_real_traced, _ = theano.scan(
-            fn=row_fn,
-            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
-            non_sequences=[dm_real]
-        )
-        dm_imag_traced, _ = theano.scan(
-            fn=row_fn,
-            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
-            non_sequences=[dm_imag]
-        )
-        dm_traced_r1 = T.concatenate(
-            (dm_real_traced, -dm_imag_traced),
-            axis=1
-        )
-        dm_traced_r2 = T.concatenate(
-            (dm_imag_traced, dm_real_traced),
-            axis=1
-        )
-        dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
-        return dm_traced
-        # return dm_traced
 
     def fidelity(self, states, target_states):
         """This is the cost function of the model.
@@ -537,15 +508,18 @@ class QubitNetwork:
 
         # expH_times_state is the full output state given by the qubit
         # network.
-        # *state* in general is a matrix (array of state vectors) so
-        # that *expH_times_state* is also a matrix with a number of
-        # rows equal to the number of training vectors.
+        # `state` in general is a matrix (array of state vectors) so
+        # that `expH_times_state` is also a matrix with a number of
+        # rows equal to the number of training vectors. Every row
+        # of this matrix is a state evolved according to the gate
+        # implemented by the network with the current interactions
+        # parameters.
         expH_times_state = T.tensordot(expH, states, axes=([1], [1])).T
 
         # `col_fn` and `row_fn` are used inside `build_density_matrices`
         # to compute the partial traces
         def col_fn(col_idx, row_idx, matrix):
-            subm_dim = 2 ** self.num_ancillas
+            subm_dim = 2 ** self.num_ancillae
             return T.nlinalg.trace(
                 matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
                        col_idx * subm_dim:(col_idx + 1) * subm_dim])
@@ -553,16 +527,16 @@ class QubitNetwork:
         def row_fn(row_idx, matrix):
             results, _ = theano.scan(
                 fn=col_fn,
-                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillas),
+                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillae),
                 non_sequences=[row_idx, matrix]
             )
             return results
 
-        # *build_density_matrices* is to be called by the immediately
-        # following theano.scan, and its output is given to *dm*.
-        # Every call to *build_density_matrices* returns the density
+        # `build_density_matrices` is to be called by the immediately
+        # following theano.scan, and its output is given to `dm`.
+        # Every call to `build_density_matrices` returns the density
         # matrix obtained after tracing out the ancillary degrees of
-        # freedom. Overall *dm* will therefore be an array of such
+        # freedom. Overall `dm` will therefore be an array of such
         # density matrices.
         def compute_fidelities(i, matrix, target_states):
             # here matrix[i] is the i-th training state after evolution
@@ -575,23 +549,14 @@ class QubitNetwork:
 
             dm_real_traced, _ = theano.scan(
                 fn=row_fn,
-                sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillas),
+                sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillae),
                 non_sequences=[dm_real]
             )
             dm_imag_traced, _ = theano.scan(
                 fn=row_fn,
-                sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillas),
+                sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillae),
                 non_sequences=[dm_imag]
             )
-            # dm_traced_r1 = T.concatenate(
-            #     (dm_real_traced, -dm_imag_traced),
-            #     axis=1
-            # )
-            # dm_traced_r2 = T.concatenate(
-            #     (dm_imag_traced, dm_real_traced),
-            #     axis=1
-            # )
-            # dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
 
             target_state = target_states[i]
             target_state_real = target_state[:target_state.shape[0] // 2, None]
@@ -601,15 +566,6 @@ class QubitNetwork:
             target_dm_imag = (target_state_imag * target_state_real.T -
                               target_state_real * target_state_imag.T)
 
-            # target_dm_r1 = T.concatenate(
-            #     (target_dm_real, -target_dm_imag),
-            #     axis=1
-            # )
-            # target_dm_r2 = T.concatenate(
-            #     (target_dm_imag, -target_dm_real),
-            #     axis=1
-            # )
-            # target_dm = T.concatenate((target_dm_r1, target_dm_r2), axis=0)
             prod_real = (T.dot(dm_real_traced, target_dm_real) -
                          T.dot(dm_imag_traced, target_dm_imag))
             tr_real = T.nlinalg.trace(prod_real)
@@ -623,13 +579,35 @@ class QubitNetwork:
             # guess we should show why this is correct?
             return tr_real
 
-            # return tr_abs
+        def fidelities_no_ptrace(i, states, target_states):
+            state = states[i]
+            target_state = target_states[i]
+            state_real = state[:state.shape[0] // 2]
+            state_imag = state[state.shape[0] // 2:]
+            target_state_real = target_state[:target_state.shape[0] // 2]
+            target_state_imag = target_state[target_state.shape[0] // 2:]
 
-        fidelities, _ = theano.scan(
-            fn=compute_fidelities,
-            sequences=T.arange(expH_times_state.shape[0]),
-            non_sequences=[expH_times_state, target_states]
-        )
+            fidelity_real = (T.dot(state_real, target_state_real) +
+                             T.dot(state_imag, target_state_imag))
+            fidelity_imag = (T.dot(state_real, target_state_imag) -
+                             T.dot(state_imag, target_state_real))
+            fidelity = fidelity_real ** 2 + fidelity_imag ** 2
+            return fidelity
+
+        # the function also supports the case in which there are no
+        # ancillae over which to trace over.
+        if self.num_ancillae == 0:
+            fidelities, _ = theano.scan(
+                fn=fidelities_no_ptrace,
+                sequences=T.arange(expH_times_state.shape[0]),
+                non_sequences=[expH_times_state, target_states]
+            )
+        else:
+            fidelities, _ = theano.scan(
+                fn=compute_fidelities,
+                sequences=T.arange(expH_times_state.shape[0]),
+                non_sequences=[expH_times_state, target_states]
+            )
 
         # return fidelities
         return T.mean(fidelities)
@@ -790,6 +768,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             if print_fidelity:
                 print('Epoch {}, '.format(n_epoch), end='')
 
+            # compute fidelity and update parameters
             for minibatch_index in range(n_train_batches):
                 minibatch_avg_cost = train_model(minibatch_index)
 
@@ -821,4 +800,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # save results if appropriate parameters have been given
     conditionally_save()
 
-    return _net, (train_model, test_model)
+    if precompiled_functions is None:
+        return _net
+    else:
+        return _net, (train_model, test_model)

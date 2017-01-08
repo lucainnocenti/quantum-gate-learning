@@ -148,7 +148,25 @@ def chop(arr, eps=1e-3):
         _arr = qutip.Qobj(_arr, dims=arr.dims)
         return _arr
     else:
-        arr = np.asarry(arr)
+        arr = np.asarray(arr)
         arr.real[np.abs(arr.real) < eps] = 0.0
         arr.imag[np.abs(arr.imag) < eps] = 0.0
         return arr
+
+
+def group_similar_elements(numbers, eps=1e-3):
+    indices_left = list(range(len(numbers)))
+    outlist = []
+    for idx, num in enumerate(numbers):
+        if idx not in indices_left:
+            continue
+        outlist.append([idx])
+        to_remove = []
+        for idxidx, idx2 in enumerate(indices_left):
+            if np.abs(num - numbers[idx2]) < eps and idx != idx2:
+                outlist[-1].append(idx2)
+                to_remove.append(idxidx)
+        for ir in sorted(to_remove, reverse=True):
+            del indices_left[ir]
+
+    return outlist
