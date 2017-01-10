@@ -45,7 +45,7 @@ def load_network_from_file(infile):
 def transfer_J_values(source_net, target_net):
     source_J = source_net.J.get_value()
     target_J = target_net.J.get_value()
-    target_interactions = target_net.get_all_interactions()
+    target_interactions = target_net.interactions
 
     for idx, J in enumerate(source_J):
         interaction = source_net.J_index_to_interaction(idx)
@@ -76,7 +76,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                             interactions=('all', ['xx', 'yy', 'zz']),
                             self_interactions=('all', ['x', 'y', 'z']),
                             system_qubits=[0, 1, 2])
-    elif type(net) == QubitNetwork:
+    elif isinstance(net, QubitNetwork):
         # everything fine, move along
         _net = net
     elif isinstance(net, str):
