@@ -675,5 +675,4 @@ class QubitNetwork:
             )
 
         # return the mean of the fidelities
-        # return expH_times_state
         return T.mean(fidelities)
