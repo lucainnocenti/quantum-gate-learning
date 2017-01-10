@@ -668,18 +668,6 @@ def load_network_from_file(infile):
     return net
 
 
-def test_compiled_dm(net, state):
-    state_for_net = theano.shared(complex2bigreal(state))
-    cost = net.test_compiled_dm(state_for_net)
-
-    dm = theano.function(
-        inputs=[],
-        outputs=cost
-    )
-
-    return dm()
-
-
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100,
                      backup_file=None,
