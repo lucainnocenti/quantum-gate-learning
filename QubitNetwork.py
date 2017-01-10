@@ -306,7 +306,12 @@ class QubitNetwork:
         with open(outfile, 'wb') as file:
             pickle.dump(data, file)
 
+    def save_gate_to_file(self, outfile):
+        np.savetxt(outfile, self.get_current_gate(), delimiter=',')
+
     def tuple_to_xs_index(self, pair):
+        """Returns the index *within* `active_hs` or `active_Js` vector."""
+
         if not isinstance(pair, tuple):
             raise TypeError('`pair` must be a tuple.')
 
@@ -361,6 +366,61 @@ class QubitNetwork:
                              'ple of two integer numbers, representing a pairw'
                              'ise interaction')
 
+    def tuple_to_J_index(self, pair):
+        if self.net_topology is None:
+            # if `pair` is a pairwise interaction
+            if len(pair[0]) == 2:
+                return (self.num_self_interactions +
+                        self.tuple_to_xs_index(pair))
+            # else we assume `pair` is a self-interaction term
+            elif len(pair[0]) == 1:
+                return self.tuple_to_xs_index(pair)
+            else:
+                raise ValueError('Invalid value for pair[0].')
+        else:
+            raise NotImplementedError()
+
+    def J_index_to_interaction(self, index):
+        """
+        Gives the tuple representing the interaction `self.J[index]`.
+
+        The set of (self-)interaction parameters of a qubit network is
+        stored in the `self.J` variable of the `QubitNetwork` instance.
+        This function is a utility to easily recover which interaction
+        corresponds to the given index.
+
+        If `self.net_topology` has not been given, this is done by
+        simply looking at the values of `active_hs` and `active_Js`,
+        remembering that the `J` vector is built by concatenating the
+        hs self-interactions and the Js interactions (in this order).
+        If a custom `self.net_topology` was given, then its value is
+        used to recover the (self-)interaction corresponding to the `J`
+        element.
+        """
+        if self.net_topology is None:
+            # if the index represents a self interaction...
+            if 0 <= index < self.num_self_interactions:
+                count = 0
+                for qb, dirs in self.active_hs.items():
+                    if index < count + len(dirs):
+                        # index points to a dir of this qubit
+                        return (qb, dirs[index - count])
+                    else:
+                        count += len(dirs)
+            # if the index represents a pairwise interaction...
+            elif index < self.num_self_interactions + self.num_interactions:
+                index = index - self.num_self_interactions
+                count = 0
+                for pair, dirs in self.active_Js.items():
+                    if index < count + len(dirs):
+                        return (pair, dirs[index - count])
+                    else:
+                        count += len(dirs)
+            else:
+                raise ValueError('`index` has an invalid value.')
+        else:
+            raise NotImplementedError('Not implemented yet!')
+
     def build_custom_H_factors(self):
         if self.net_topology is None:
             H_factors = np.concatenate(
@@ -389,31 +449,6 @@ class QubitNetwork:
                         factors[-1] += self.tuple_to_xs_factor(pair)
             return T.tensordot(self.J, factors, axes=1)
 
-    def J_index_to_interaction(self, index):
-        if self.net_topology is None:
-            # if the index represents a self interaction...
-            if 0 <= index < self.num_self_interactions:
-                count = 0
-                for qb, dirs in self.active_hs.items():
-                    if index < count + len(dirs):
-                        # index points to a dir of this qubit
-                        return (qb, dirs[index - count])
-                    else:
-                        count += len(dirs)
-            # if the index represents a pairwise interaction...
-            elif index < self.num_self_interactions + self.num_interactions:
-                index = index - self.num_self_interactions
-                count = 0
-                for pair, dirs in self.active_Js.items():
-                    if index < count + len(dirs):
-                        return (pair, dirs[index - count])
-                    else:
-                        count += len(dirs)
-            else:
-                raise ValueError('`index` has an invalid value.')
-        else:
-            raise NotImplementedError()
-
     def get_current_gate(self):
         """Returns the currently produced unitary, in complex form."""
         if self.net_topology is None:
@@ -426,6 +461,7 @@ class QubitNetwork:
             raise NotImplementedError()
 
     def fidelity_1s(self, state, target_state):
+        """UNTESTED"""
         # this builds the Hamiltonian of the system (in big real matrix
         # form), already multiplied with the 1j factor and ready for
         # exponentiation.
