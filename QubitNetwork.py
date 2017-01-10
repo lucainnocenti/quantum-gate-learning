@@ -42,16 +42,15 @@ class QubitNetwork:
 
         # we store all the possible pairs for convenience
         self.pairs = list(itertools.combinations(range(self.num_qubits), 2))
-        # decode_interactions_dict fills the self.active_Js variable
-        self.active_Js = self.decode_interactions(interactions)
-        self.active_hs = self.decode_self_interactions(self_interactions)
 
-        self.num_interactions = self.count_interactions()
-        self.num_self_interactions = self.count_self_interactions()
-
-        # Js_factors and hs_factors store the matrices, in big real form,
-        # that will have to multiplied by the *Js* and *hs* factors
-        self.Js_factors, self.hs_factors = self.build_H_components()
+        if net_topology is None:
+            self.net_topology = None
+        else:
+            self.net_topology = OrderedDict(net_topology)
+        # `parse_interactions` fills the `self.interactions`,
+        # `self.num_interactions` and `self.num_self_interactions`
+        # variables
+        self.parse_interactions(interactions)
 
         # Build the initial state of the ancillae, if there are any
         if self.num_ancillae > 0:
@@ -64,8 +63,7 @@ class QubitNetwork:
         if J is None:
             if net_topology is None:
                 self.J = theano.shared(
-                    value=np.random.randn(
-                        self.num_interactions + self.num_self_interactions),
+                    value=np.random.randn(self.num_interactions),
                     name='J',
                     borrow=True
                 )
@@ -81,8 +79,8 @@ class QubitNetwork:
             if net_topology is not None:
                 num_symbols = len(set(s for s in net_topology.values()))
                 if np.asarray(J).shape[0] != num_symbols:
-                    raise ValueError('The number of specified parameters does '
-                                     'is not consistent with the value of `net'
+                    raise ValueError('The number of specified parameters is '
+                                     'not consistent with the value of `net'
                                      '_topology`.')
             self.J = theano.shared(
                 value=np.asarray(J),
@@ -90,14 +88,12 @@ class QubitNetwork:
                 borrow=True
             )
 
-        self.net_topology = net_topology
+    def parse_interactions(self, interactions):
+        """Sets the value of `self.interactions`. Returns None.
 
-    def decode_interactions(self, interactions):
-        """Returns an OrderedDict with the requested interactions.
-
-        The output of `decode_interactions` is passed to `self.active_Js`, and
-        is meant to represent all the interactions that are switched on in the
-        created qubit network.
+        The input-given value of `interactions` is parsed, and the value
+        of `self.interactions` is accordingly set to describe the whole
+        set of (self-)interactions in the network.
 
         Parameters
         ----------
@@ -110,129 +106,212 @@ class QubitNetwork:
 
         Returns
         -------
-        An OrderedDict with the specified interactions formatted in a standard
-        form.
+        None
         """
-        if interactions == 'all':
-            allsigmas = [item[0] + item[1]
-                         for item in
-                         itertools.product(['x', 'y', 'z'], repeat=2)]
-            return OrderedDict([(pair, allsigmas) for pair in self.pairs])
+        outints = []
+
+        if self.net_topology is not None:
+            # the expected form of `self.net_topology` is a dictionary like
+            # the following:
+            # {
+            #   ((1, 2), 'xx'): 'a',
+            #   ((1, 3), 'xx'): 'a',
+            #   ((2, 3), 'xx'): 'a',
+            #   ((1, 2), 'xy'): 'b',
+            # }
+            outints = list(self.net_topology.keys())
+        elif interactions == 'all':
+            # create all self-interaction terms
+            for qubit in range(self.num_qubits):
+                for s in ['x', 'y', 'z']:
+                    outints.append((qubit, s))
+            # create all interactions terms
+            for pair in self.pairs:
+                for s1 in ['x', 'y', 'z']:
+                    for s2 in ['x', 'y', 'z']:
+                        outints.append((pair, s1 + s2))
+
         elif isinstance(interactions, tuple):
             if interactions[0] == 'all':
-                d = [(pair, interactions[1]) for pair in self.pairs]
-                return OrderedDict(d)
-        # if `interactions` is dictionary-like, then return it back,
-        # changing values that are strings (thus representing single
-        # interactions corresponding to some qubit pair) converted to
-        # lists with the single element equal to that string.
-        elif isinstance(interactions, dict):
-            parsed_interactions = OrderedDict()
-            for k, v in interactions.items():
-                if not isinstance(k, tuple):
-                    raise ValueError('All keys must be tuples.')
-                if isinstance(v, str):
-                    parsed_interactions[k] = [v]
-                else:
-                    parsed_interactions[k] = v
-            return parsed_interactions
+                # here we need to first iterate over the interaction
+                # types because they can be either self- or pairwise
+                # interactions, and depending on this they must be
+                # associated to single or pairs of qubits, respectively.
+                for d in interactions[1]:
+                    if len(d) == 1:
+                        for qubit in range(self.num_qubits):
+                            outints.append((qubit, d))
+                    elif len(d) == 2:
+                        for pair in self.pairs:
+                            outints.append((pair, d))
+        elif isinstance(interactions, list):
+            outints = interactions
         else:
-            raise ValueError('Invalid value given for interactions.')
+            raise ValueError(
+                'Invalid value given for interactions.',
+                interactions)
 
-    def decode_self_interactions(self, self_interactions):
-        if self_interactions == 'all':
-            return OrderedDict(
-                [(idx, ['x', 'y', 'z']) for idx in range(self.num_qubits)])
-        elif isinstance(self_interactions, tuple):
-            if self_interactions[0] == 'all':
-                d = [(idx, self_interactions[1])
-                     for idx in range(self.num_qubits)]
-                return OrderedDict(d)
-            else:
-                raise ValueError('Invalid value for self_interactions.')
-        elif (isinstance(self_interactions, dict) and
-              all(isinstance(k, int) for k in self_interactions.keys())):
-            return OrderedDict(self_interactions)
-        else:
-            raise ValueError('Invalid value of self_interactions.')
+        num_self_interactions = 0
+        for q, d in outints:
+            if len(d) == 1:
+                num_self_interactions += 1
 
-    def count_interactions(self):
-        count = 0
-        for k, v in self.active_Js.items():
-            if isinstance(v, str):
-                count += 1
-            else:
-                count += len(v)
-        return count
+        self.interactions = outints
+        self.num_interactions = len(outints)
+        self.num_self_interactions = num_self_interactions
 
-    def count_self_interactions(self):
-        count = 0
-        for k, v in self.active_hs.items():
-            if isinstance(v, str):
-                count += 1
-            else:
-                count += len(v)
-        return count
+    # def decode_self_interactions(self, self_interactions):
+    #     """OBSOLETE FUNCTION"""
+    #     raise DeprecationWarning()
 
-    def build_H_components(self):
-        """Builds the list of factors to be multiplied by the parameters.
+    #     if self_interactions == 'all':
+    #         return OrderedDict(
+    #             [(idx, ['x', 'y', 'z']) for idx in range(self.num_qubits)])
+    #     elif isinstance(self_interactions, tuple):
+    #         if self_interactions[0] == 'all':
+    #             d = [(idx, self_interactions[1])
+    #                  for idx in range(self.num_qubits)]
+    #             return OrderedDict(d)
+    #         else:
+    #             raise ValueError('Invalid value for self_interactions.')
+    #     elif (isinstance(self_interactions, dict) and
+    #           all(isinstance(k, int) for k in self_interactions.keys())):
+    #         return OrderedDict(self_interactions)
+    #     else:
+    #         raise ValueError('Invalid value of self_interactions.')
 
-        Every element in the output numpy array is the factor to which a
-        corresponding network parameters will have to be multiplied.
-        More specifically, a 2-element tuple is returned, the first
-        element of which containing the pairwise interactions term and the
-        second element of which containing the self-interaction terms.
+    # def count_interactions(self):
+    #     count = 0
+    #     for k, v in self.active_Js.items():
+    #         if isinstance(v, str):
+    #             count += 1
+    #         else:
+    #             count += len(v)
+    #     return count
 
-        All the terms are already multiplied by the imaginary unit 1j and
-        converted into big real form with complex2bigreal, so that all
-        that remains after is to multiply by the parameters and the matrix
-        exponential, with something like:
+    # def count_self_interactions(self):
+    #     count = 0
+    #     for k, v in self.interactions:
+    #         if len(v) == 1:
+    #             count += 1
+    #     return count
 
-        >>> J = T.dvector('J')
-        >>> H = T.tensordot(J, terms, axes=1)
-        >>> expH = T.slinalg.expm(H)
-
-        where terms is the output of this function (mind the tuple though).
-        """
-        terms_template = [qutip.qeye(2) for _ in range(self.num_qubits)]
-        Js_factors = []
-        hs_factors = []
+    def build_H_factor(self, pair):
+        term = [qutip.qeye(2) for _ in range(self.num_qubits)]
 
         sigmas = [qutip.qeye(2),
                   qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
 
-        # start by building pairwise interactions terms, filling
-        # `Js_factors`. The order of the elements in the `Js_factors`
-        # array is defined by the content of `self.active_Js`.
-        for pair, directions in self.active_Js.items():
-            # - *pair* is a pair of qubit indices, e.g. (0, 2)
-            # - *directions* is a list of elements like ss below
-            # - *ss* is a two-character string specifying an interaction
-            # direction, e.g. 'xx' or 'xy' or 'zy'
-            for ss in directions:
-                term = terms_template[:]
-                term[pair[0]] = sigmas[chars2pair(ss)[0]]
-                term[pair[1]] = sigmas[chars2pair(ss)[1]]
-                term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
-                Js_factors.append(term)
+        target, d = pair
+        # if `d` indicates a self-interaction..
+        if len(d) == 1:
+            term[target] = sigmas[chars2pair(d)[0]]
+        # if `d` indicates a pairwise interaction..
+        elif len(d) == 2:
+            term[target[0]] = sigmas[chars2pair(d)[0]]
+            term[target[1]] = sigmas[chars2pair(d)[1]]
 
-        # print(terms_template)
+        return complex2bigreal(-1j * qutip.tensor(term).data.toarray())
 
-        # proceed building self-interaction terms, filling hs_factors
-        for qubit_idx, direction in self.active_hs.items():
-            # - now direction is a list of characters among 'x', 'y' and 'z',
-            # - s is either 'x', 'y', or 'z'
-            if not isinstance(direction, list):
-                raise TypeError('`direction` must be a list.')
-            for s in direction:
-                term = terms_template[:]
-                term[qubit_idx] = sigmas[chars2pair(s)[0]]
-                # print('qubit {}, dir {}, matrix:\n{}'.format(
-                #     qubit_idx, s, qutip.tensor(term)))
-                term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
-                hs_factors.append(term)
+    # def build_H_components(self):
+    #     """Builds the list of factors to be multiplied by the parameters.
 
-        return np.asarray(Js_factors), np.asarray(hs_factors)
+    #     Every element in the output numpy array is the factor to which a
+    #     corresponding network parameters will have to be multiplied.
+    #     More specifically, a 2-element tuple is returned, the first
+    #     element of which containing the pairwise interactions term and the
+    #     second element of which containing the self-interaction terms.
+
+    #     All the terms are already multiplied by the imaginary unit 1j and
+    #     converted into big real form with complex2bigreal, so that all
+    #     that remains after is to multiply by the parameters and the matrix
+    #     exponential, with something like:
+
+    #     >>> J = T.dvector('J')
+    #     >>> H = T.tensordot(J, terms, axes=1)
+    #     >>> expH = T.slinalg.expm(H)
+
+    #     where terms is the output of this function (mind the tuple though).
+    #     """
+    #     terms_template = [qutip.qeye(2) for _ in range(self.num_qubits)]
+    #     factors = []
+    #     # Js_factors = []
+    #     # hs_factors = []
+
+    #     sigmas = [qutip.qeye(2),
+    #               qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
+
+    #     for target, d in self.interactions:
+    #         term = terms_template[:]
+    #         # if `d` indicates a self-interaction..
+    #         if len(d) == 1:
+    #             term[target] = sigmas[chars2pair(d)[0]]
+    #         # if `d` indicates a pairwise interaction..
+    #         elif len(d) == 2:
+    #             term[target[0]] = sigmas[chars2pair(d)[0]]
+    #             term[target[1]] = sigmas[chars2pair(d)[1]]
+
+    #         term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
+    #         factors.append(term)
+
+    #     return np.asarray(factors)
+
+    def build_H_factors(self, symbolic_result=True):
+        dim_real_space = 2 * 2 ** self.num_qubits
+        if self.net_topology is None:
+
+            factors = np.zeros(
+                (self.num_interactions, dim_real_space, dim_real_space),
+                dtype=np.float64
+            )
+            for idx, pair in enumerate(self.interactions):
+                factors[idx] = self.build_H_factor(pair)
+
+            if symbolic_result:
+                # return the dot product between `self.J` and `factors`,
+                # amounting to the sum over `i` of `self.J[i] * factors[i]`
+                return T.tensordot(self.J, factors, axes=1)
+            else:
+                return np.tensordot(self.J.get_value(), factors, axes=1)
+        else:
+            # the expected form of `self.net_topology` is a dictionary like
+            # the following:
+            # {
+            #   ((1, 2), 'xx'): 'a',
+            #   ((1, 3), 'xx'): 'a',
+            #   ((2, 3), 'xx'): 'a',
+            #   ((1, 2), 'xy'): 'b',
+            # }
+
+            # symbols = []
+            # for symb in self.net_topology.values():
+            #     if symb not in symbols:
+            #         symbols.append(str(symb))
+            # symbols.sort()
+            symbols = sorted(set(self.net_topology.values()))
+
+            factors = np.zeros(
+                (self.num_interactions, dim_real_space, dim_real_space),
+                dtype=np.float64
+            )
+
+            # The number of elements in `symbols` should be equal to
+            # `self.num_interactions`, computed by `parse_interactions`.
+            # Note that is the code below that determines to what
+            # interaction does the i-th element of `self.J` correspond
+            # to.
+            # The i-th element of `self.J` will correspond to the
+            # interactions terms associated to the i-th symbol listed
+            # in `symbols` (after sorting).
+            for idx, symb in enumerate(symbols):
+                for pair, label in self.net_topology.items():
+                    if str(label) == symb:
+                        factors[idx] += self.build_H_factor(pair)
+
+            if symbolic_result:
+                return T.tensordot(self.J, factors, axes=1)
+            else:
+                return np.tensordot(self.J.get_value(), factors, axes=1)
 
     def build_ancilla_state(self):
         """Returns an initial ancilla state, as a qutip.Qobj object.
@@ -297,8 +376,7 @@ class QubitNetwork:
         data = {
             'num_qubits': self.num_qubits,
             'num_system_qubits': self.num_system_qubits,
-            'active_hs': self.active_hs,
-            'active_Js': self.active_Js,
+            'interactions': self.interactions,
             'J': self.J.get_value()
         }
         if not os.path.isabs(outfile):
@@ -309,43 +387,8 @@ class QubitNetwork:
     def save_gate_to_file(self, outfile):
         np.savetxt(outfile, self.get_current_gate(), delimiter=',')
 
-    def tuple_to_xs_index(self, pair):
-        """Returns the index *within* `active_hs` or `active_Js` vector."""
-
-        if not isinstance(pair, tuple):
-            raise TypeError('`pair` must be a tuple.')
-
-        # if `pair` represents a self-interaction:
-        if isinstance(pair[0], int):
-            idx = 0
-            found = False
-            for qubit, dirs in self.active_hs.items():
-                if qubit == pair[0]:
-                    idx += dirs.index(pair[1])
-                    return idx
-                else:
-                    idx += len(dirs)
-            if not found:
-                raise ValueError('The value of `pair` is invalid.')
-
-        # otherwise it should represent a pairwise interaction:
-        elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
-            idx = 0
-            found = False
-            for qubits, dirs in self.active_Js.items():
-                if qubits == pair[0]:
-                    idx += dirs.index(pair[1])
-                    return idx
-                else:
-                    idx += len(dirs)
-            if not found:
-                raise ValueError('The value of `pair` is invalid.')
-        # otherwise fuck it
-        else:
-            raise ValueError('The first element of `pair` should be an integer'
-                             ' number representing a self-interaction, or a tu'
-                             'ple of two integer numbers, representing a pairw'
-                             'ise interaction')
+    def tuple_to_interaction_index(self, pair):
+        self.interactions.index(pair)
 
     def tuple_to_xs_factor(self, pair):
         if not isinstance(pair, tuple):
@@ -368,13 +411,13 @@ class QubitNetwork:
 
     def tuple_to_J_index(self, pair):
         if self.net_topology is None:
-            # if `pair` is a pairwise interaction
-            if len(pair[0]) == 2:
+            # if `pair` is a self-interaction
+            if isinstance(pair[0], int):
+                return self.tuple_to_xs_index(pair)
+            # else we assume an interaction term
+            elif len(pair[0]) == 2:
                 return (self.num_self_interactions +
                         self.tuple_to_xs_index(pair))
-            # else we assume `pair` is a self-interaction term
-            elif len(pair[0]) == 1:
-                return self.tuple_to_xs_index(pair)
             else:
                 raise ValueError('Invalid value for pair[0].')
         else:
@@ -390,75 +433,56 @@ class QubitNetwork:
         corresponds to the given index.
 
         If `self.net_topology` has not been given, this is done by
-        simply looking at the values of `active_hs` and `active_Js`,
-        remembering that the `J` vector is built by concatenating the
-        hs self-interactions and the Js interactions (in this order).
+        simply looking at `self.interactions`, which lists all (and
+        only) the active interactions in the network.
         If a custom `self.net_topology` was given, then its value is
         used to recover the (self-)interaction corresponding to the `J`
-        element.
+        element. The output will therefore in this case be a list of
+        tuples, each one representing a single interaction.
         """
         if self.net_topology is None:
-            # if the index represents a self interaction...
-            if 0 <= index < self.num_self_interactions:
-                count = 0
-                for qb, dirs in self.active_hs.items():
-                    if index < count + len(dirs):
-                        # index points to a dir of this qubit
-                        return (qb, dirs[index - count])
-                    else:
-                        count += len(dirs)
-            # if the index represents a pairwise interaction...
-            elif index < self.num_self_interactions + self.num_interactions:
-                index = index - self.num_self_interactions
-                count = 0
-                for pair, dirs in self.active_Js.items():
-                    if index < count + len(dirs):
-                        return (pair, dirs[index - count])
-                    else:
-                        count += len(dirs)
-            else:
-                raise ValueError('`index` has an invalid value.')
+            self.interactions[index]
         else:
-            raise NotImplementedError('Not implemented yet!')
+            symbols = sorted(set(self.net_topology.values()))
+            interactions = []
+            for interaction, symb in self.net_topology.items():
+                if symb == symbols[index]:
+                    interactions.append(interaction)
+            return interactions
 
-    def build_custom_H_factors(self):
+    # def get_all_interactions(self):
+    #     """DEPRECATED
+    #     Returns a list of tuples representing all the interactions.
+    #     """
+    #     return self.interactions
+
+    def remove_interaction(self, interaction_tuple):
         if self.net_topology is None:
-            H_factors = np.concatenate(
-                (self.hs_factors, self.Js_factors), axis=0)
-            return T.tensordot(self.J, H_factors, axes=1)
+            idx = self.interactions.index(interaction_tuple)
+            Js = self.J.get_value()
+            del self.interactions[idx]
+            del Js[idx]
+            self.J.set_value(Js)
         else:
-            # the expected form of `self.net_topology` is a dictionary like
-            # the following:
-            # {
-            #   ((1, 2), 'xx'): 'a',
-            #   ((1, 3), 'xx'): 'a',
-            #   ((2, 3), 'xx'): 'a',
-            #   ((1, 2), 'xy'): 'b',
-            # }
-            symbols = []
-            for symb in self.net_topology.values():
-                if symb not in symbols:
-                    symbols.append(str(symb))
-            symbols.sort()
-
-            factors = []
-            for symb in symbols:
-                factors.append(np.zeros_like(self.hs_factors[0]))
-                for pair, label in self.net_topology.items():
-                    if str(label) == symb:
-                        factors[-1] += self.tuple_to_xs_factor(pair)
-            return T.tensordot(self.J, factors, axes=1)
+            # idx = list(self.net_topology.keys()).index(interaction_tuple)
+            symbol = self.net_topology[interaction_tuple]
+            all_interactions = [k for k, v in self.net_topology.items()
+                                if v == symbol]
+            # if there are interactions associated to the same symbol..
+            if len(all_interactions) > 1:
+                del self.net_topology[interaction_tuple]
+            elif len(all_interactions) == 1:
+                symbols = sorted(set(self.net_topology.values()))
+                Js = self.J.get_value()
+                del Js[symbols.index(symbol)]
+                self.J.set_value(Js)
 
     def get_current_gate(self):
         """Returns the currently produced unitary, in complex form."""
-        if self.net_topology is None:
-            gate = np.concatenate((self.hs_factors, self.Js_factors), axis=0)
-            gate = np.tensordot(self.J.get_value(), gate, axes=1)
-            gate = scipy.linalg.expm(gate)
-            gate = bigreal2complex(gate)
-            return gate
-        else:
-            raise NotImplementedError()
+        gate = self.build_H_factors(symbolic_result=False)
+        gate = scipy.linalg.expm(gate)
+        gate = bigreal2complex(gate)
+        return gate
 
     def fidelity_1s(self, state, target_state):
         """UNTESTED, UNFINISHED"""
@@ -538,7 +562,7 @@ class QubitNetwork:
 
         # this builds the Hamiltonian of the system (in big real matrix form),
         # already multiplied with the -1j factor and ready for exponentiation
-        H = self.build_custom_H_factors()
+        H = self.build_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 
@@ -651,4 +675,5 @@ class QubitNetwork:
             )
 
         # return the mean of the fidelities
+        # return expH_times_state
         return T.mean(fidelities)

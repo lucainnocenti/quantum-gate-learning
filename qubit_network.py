@@ -15,14 +15,48 @@ def load_network_from_file(infile):
     import pickle
     with open(infile, 'rb') as file:
         data = pickle.load(file)
+
+    # the interface was recently changed and `active_hs` and `active_Js`
+    # aren't class attributes anymore. Instead the interactions are all
+    # stored into the `QubitNetwork.interactions` attribute.
+    # Nevertheless some networks were saved with the old interace so
+    # we need to handle these cases appropriately
+    if 'active_Js' in data.keys():
+        interactions = []
+        for qubit, dirs in data['active_hs'].items():
+            for d in dirs:
+                interactions.append((qubit, d))
+
+        for pair, dirs in data['active_Js'].items():
+            for d in dirs:
+                interactions.append((pair, d))
+    else:
+        interactions = data['interactions']
+
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
-        interactions=data['active_Js'],
-        self_interactions=data['active_hs'],
+        interactions=interactions,
         system_qubits=data['num_system_qubits'],
         J=data['J']
     )
     return net
+
+
+def transfer_J_values(source_net, target_net):
+    source_J = source_net.J.get_value()
+    target_J = target_net.J.get_value()
+    target_interactions = target_net.get_all_interactions()
+
+    for idx, J in enumerate(source_J):
+        interaction = source_net.J_index_to_interaction(idx)
+        # print(interaction)
+        # if `interaction` is active in `target_net`, then we transfer
+        # its value from `source_net` to `target_net`.
+        if interaction in target_interactions:
+            target_idx = target_net.tuple_to_J_index(interaction)
+            target_J[target_idx] = J
+
+    target_net.J.set_value(target_J)
 
 
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
