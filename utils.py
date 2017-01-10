@@ -152,3 +152,17 @@ def chop(arr, eps=1e-3):
         arr.real[np.abs(arr.real) < eps] = 0.0
         arr.imag[np.abs(arr.imag) < eps] = 0.0
         return arr
+
+
+def transfer_J_values(source_net, target_net):
+    source_J = source_net.J.get_value()
+    target_J = target_net.J.get_value()
+    for idx, J in enumerate(source_J):
+        interaction = source_net.J_index_to_interaction(idx)
+        # if `interaction` is active in `target_net`, then we transfer
+        # its value from `source_net` to `target_net`.
+        if (interaction in target_net.active_hs or
+                interaction in target_net.active_Js):
+            target_idx = target_net.tuple_to_J_index(interaction)
+            target_J[target_idx] = J
+    target_net.J.set_value(target_J)
