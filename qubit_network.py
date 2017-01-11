@@ -33,10 +33,16 @@ def load_network_from_file(infile):
     else:
         interactions = data['interactions']
 
+    if 'target_gate' in data.keys():
+        target_gate = data['target_gate']
+    else:
+        target_gate = None
+
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
         interactions=interactions,
         system_qubits=data['num_system_qubits'],
+        target_gate=target_gate,
         J=data['J']
     )
     return net
@@ -71,7 +77,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      print_fidelity=False):
 
     # parse the `net` parameter
-    print(isinstance(net, QubitNetwork))
+    # print(isinstance(net, QubitNetwork))
     if net is None:
         _net = QubitNetwork(num_qubits=4,
                             interactions=('all', ['xx', 'yy', 'zz']),
@@ -89,6 +95,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # parse `target_gate` parameter
     if target_gate is None:
         raise ValueError('`target_gate` must have a value.')
+    _net.target_gate = target_gate
 
     # parse `backup_file` parameter
     if isinstance(backup_file, str):
@@ -125,9 +132,9 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     )
 
     print('Building the model...')
+
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a minibatch
-
     # generate symbolic variables for input data and labels
     x = T.dmatrix('x')  # input state (data). Every row is a state vector
     y = T.dmatrix('y')  # output target state (label). As above
@@ -212,6 +219,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         pass
 
     print('Finished training')
+    print('Final fidelity: ', end='')
+    print(_net.test_fidelity())
 
     # save results if appropriate parameters have been given
     conditionally_save()

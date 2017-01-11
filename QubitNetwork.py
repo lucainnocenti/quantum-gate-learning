@@ -14,15 +14,16 @@ from utils import chars2pair, complex2bigreal, bigreal2complex
 
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
-                 interactions='all', self_interactions='all',
+                 interactions='all',
                  ancillae_state=None,
+                 target_gate=None,
                  net_topology=None,
                  J=None):
-        # *self.num_qubits* is the TOTAL number of qubits in the
+        # `self.num_qubits` is the TOTAL number of qubits in the
         # network, regardless of them being system or ancilla qubits
         self.num_qubits = num_qubits
         # Define which qubits belong to the system. The others are all
-        # assumed to be ancilla qubits. If *system_qubits* was not
+        # assumed to be ancilla qubits. If `system_qubits` was not
         # explicitly given it is assumed that half of the qubits are the
         # system and half are ancillae
         if system_qubits is None:
@@ -34,6 +35,11 @@ class QubitNetwork:
             self.system_qubits = tuple(range(system_qubits))
         else:
             raise ValueError('Invalid value for system_qubits.')
+
+        # `self.target_gate` is given a value when the net is being
+        # trained, for example by `sgd_optimization`. It is used simply
+        # to keep track of what the network was trained to reproduce.
+        self.target_gate = target_gate
 
         # it will still be useful in the following to have direct access
         # to the number of ancilla and system qubits
@@ -160,42 +166,6 @@ class QubitNetwork:
         self.num_interactions = len(outints)
         self.num_self_interactions = num_self_interactions
 
-    # def decode_self_interactions(self, self_interactions):
-    #     """OBSOLETE FUNCTION"""
-    #     raise DeprecationWarning()
-
-    #     if self_interactions == 'all':
-    #         return OrderedDict(
-    #             [(idx, ['x', 'y', 'z']) for idx in range(self.num_qubits)])
-    #     elif isinstance(self_interactions, tuple):
-    #         if self_interactions[0] == 'all':
-    #             d = [(idx, self_interactions[1])
-    #                  for idx in range(self.num_qubits)]
-    #             return OrderedDict(d)
-    #         else:
-    #             raise ValueError('Invalid value for self_interactions.')
-    #     elif (isinstance(self_interactions, dict) and
-    #           all(isinstance(k, int) for k in self_interactions.keys())):
-    #         return OrderedDict(self_interactions)
-    #     else:
-    #         raise ValueError('Invalid value of self_interactions.')
-
-    # def count_interactions(self):
-    #     count = 0
-    #     for k, v in self.active_Js.items():
-    #         if isinstance(v, str):
-    #             count += 1
-    #         else:
-    #             count += len(v)
-    #     return count
-
-    # def count_self_interactions(self):
-    #     count = 0
-    #     for k, v in self.interactions:
-    #         if len(v) == 1:
-    #             count += 1
-    #     return count
-
     def build_H_factor(self, pair):
         term = [qutip.qeye(2) for _ in range(self.num_qubits)]
 
@@ -212,49 +182,6 @@ class QubitNetwork:
             term[target[1]] = sigmas[chars2pair(d)[1]]
 
         return complex2bigreal(-1j * qutip.tensor(term).data.toarray())
-
-    # def build_H_components(self):
-    #     """Builds the list of factors to be multiplied by the parameters.
-
-    #     Every element in the output numpy array is the factor to which a
-    #     corresponding network parameters will have to be multiplied.
-    #     More specifically, a 2-element tuple is returned, the first
-    #     element of which containing the pairwise interactions term and the
-    #     second element of which containing the self-interaction terms.
-
-    #     All the terms are already multiplied by the imaginary unit 1j and
-    #     converted into big real form with complex2bigreal, so that all
-    #     that remains after is to multiply by the parameters and the matrix
-    #     exponential, with something like:
-
-    #     >>> J = T.dvector('J')
-    #     >>> H = T.tensordot(J, terms, axes=1)
-    #     >>> expH = T.slinalg.expm(H)
-
-    #     where terms is the output of this function (mind the tuple though).
-    #     """
-    #     terms_template = [qutip.qeye(2) for _ in range(self.num_qubits)]
-    #     factors = []
-    #     # Js_factors = []
-    #     # hs_factors = []
-
-    #     sigmas = [qutip.qeye(2),
-    #               qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
-
-    #     for target, d in self.interactions:
-    #         term = terms_template[:]
-    #         # if `d` indicates a self-interaction..
-    #         if len(d) == 1:
-    #             term[target] = sigmas[chars2pair(d)[0]]
-    #         # if `d` indicates a pairwise interaction..
-    #         elif len(d) == 2:
-    #             term[target[0]] = sigmas[chars2pair(d)[0]]
-    #             term[target[1]] = sigmas[chars2pair(d)[1]]
-
-    #         term = complex2bigreal(-1j * qutip.tensor(term).data.toarray())
-    #         factors.append(term)
-
-    #     return np.asarray(factors)
 
     def build_H_factors(self, symbolic_result=True):
         dim_real_space = 2 * 2 ** self.num_qubits
@@ -377,6 +304,7 @@ class QubitNetwork:
             'num_qubits': self.num_qubits,
             'num_system_qubits': self.num_system_qubits,
             'interactions': self.interactions,
+            'target_gate': self.target_gate,
             'J': self.J.get_value()
         }
         if not os.path.isabs(outfile):
@@ -390,29 +318,10 @@ class QubitNetwork:
     def tuple_to_interaction_index(self, pair):
         self.interactions.index(pair)
 
-    # def tuple_to_xs_factor(self, pair):
-    #     if not isinstance(pair, tuple):
-    #         raise TypeError('`pair` must be a tuple.')
-
-    #     # if `pair` represents a self-interaction:
-    #     if isinstance(pair[0], int):
-    #         idx = self.tuple_to_xs_index(pair)
-    #         return self.hs_factors[idx]
-    #     # otherwise it should represent a pairwise interaction:
-    #     elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
-    #         idx = self.tuple_to_xs_index(pair)
-    #         return self.Js_factors[idx]
-    #     # otherwise fuck it
-    #     else:
-    #         raise ValueError('The first element of `pair` should be an integer'
-    #                          ' number representing a self-interaction, or a tu'
-    #                          'ple of two integer numbers, representing a pairw'
-    #                          'ise interaction')
-
     def tuple_to_J_index(self, interaction):
         if self.net_topology is None:
             # if `pair` is a self-interaction
-            self.interactions.index(interaction)
+            return self.interactions.index(interaction)
         else:
             raise NotImplementedError()
 
@@ -434,7 +343,7 @@ class QubitNetwork:
         tuples, each one representing a single interaction.
         """
         if self.net_topology is None:
-            self.interactions[index]
+            return self.interactions[index]
         else:
             symbols = sorted(set(self.net_topology.values()))
             interactions = []
@@ -442,12 +351,6 @@ class QubitNetwork:
                 if symb == symbols[index]:
                     interactions.append(interaction)
             return interactions
-
-    # def get_all_interactions(self):
-    #     """DEPRECATED
-    #     Returns a list of tuples representing all the interactions.
-    #     """
-    #     return self.interactions
 
     def remove_interaction(self, interaction_tuple):
         if self.net_topology is None:
@@ -476,6 +379,25 @@ class QubitNetwork:
         gate = scipy.linalg.expm(gate)
         gate = bigreal2complex(gate)
         return gate
+
+    def test_fidelity(self,
+                      states=None, target_states=None,
+                      target_gate=None,
+                      n_samples=10):
+        if target_gate is None:
+            if self.target_gate is None:
+                raise ValueError('No target gate has been specified')
+            else:
+                target_gate = self.target_gate
+
+        if states is None or target_states is None:
+            states, target_states = self.generate_training_data(
+                target_gate, n_samples)
+        fidelity = theano.function(
+            inputs=[],
+            outputs=self.fidelity(states, target_states)
+        )
+        return fidelity()
 
     def fidelity_1s(self, state, target_state):
         """UNTESTED, UNFINISHED"""
