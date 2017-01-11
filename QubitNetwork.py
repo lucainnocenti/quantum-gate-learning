@@ -53,6 +53,7 @@ class QubitNetwork:
             self.net_topology = None
         else:
             self.net_topology = OrderedDict(net_topology)
+
         # `parse_interactions` fills the `self.interactions`,
         # `self.num_interactions` and `self.num_self_interactions`
         # variables
@@ -125,7 +126,15 @@ class QubitNetwork:
             #   ((2, 3), 'xx'): 'a',
             #   ((1, 2), 'xy'): 'b',
             # }
+
             outints = list(self.net_topology.keys())
+
+            # not clear if it even makes sense to use `self.interactions`
+            # if a `net_topology` has been given..
+            self.interactions = outints
+            self.num_interactions = len(set(self.net_topology.values()))
+            return
+
         elif interactions == 'all':
             # create all self-interaction terms
             for qubit in range(self.num_qubits):
@@ -315,8 +324,8 @@ class QubitNetwork:
     def save_gate_to_file(self, outfile):
         np.savetxt(outfile, self.get_current_gate(), delimiter=',')
 
-    def tuple_to_interaction_index(self, pair):
-        self.interactions.index(pair)
+    # def tuple_to_interaction_index(self, pair):
+    #     self.interactions.index(pair)
 
     def tuple_to_J_index(self, interaction):
         if self.net_topology is None:
@@ -353,6 +362,7 @@ class QubitNetwork:
             return interactions
 
     def remove_interaction(self, interaction_tuple):
+        """Removes the specified interaction from the network."""
         if self.net_topology is None:
             idx = self.interactions.index(interaction_tuple)
             Js = self.J.get_value()
@@ -366,8 +376,15 @@ class QubitNetwork:
                                 if v == symbol]
             # if there are interactions associated to the same symbol..
             if len(all_interactions) > 1:
+                # then we just remove the corresponding entry in the
+                # `self.net_topology` variable (no need to change the
+                # value of `self.J`)
                 del self.net_topology[interaction_tuple]
+            # if there are interactions associated to the same parameter
             elif len(all_interactions) == 1:
+                # then we also remove the corresponding entry of
+                # `self.J`, in addition to removing the entry in
+                # `self.net_topology`
                 symbols = sorted(set(self.net_topology.values()))
                 Js = self.J.get_value()
                 del Js[symbols.index(symbol)]
@@ -384,6 +401,7 @@ class QubitNetwork:
                       states=None, target_states=None,
                       target_gate=None,
                       n_samples=10):
+        """Computes an average fidelity with the current values of J."""
         if target_gate is None:
             if self.target_gate is None:
                 raise ValueError('No target gate has been specified')
@@ -393,12 +411,17 @@ class QubitNetwork:
         if states is None or target_states is None:
             states, target_states = self.generate_training_data(
                 target_gate, n_samples)
+
         fidelity = theano.function(
             inputs=[],
             outputs=self.fidelity(states, target_states)
         )
         return fidelity()
 
+    # `fidelity_1s` should be to compute the fidelity over a single pair
+    # of state and target state, as opposite as the computation of the
+    # average (using `theano.scan`) as done by `fidelity`.
+    # I never actually used this so it probably doesn't work.
     def fidelity_1s(self, state, target_state):
         """UNTESTED, UNFINISHED"""
         # this builds the Hamiltonian of the system (in big real matrix
@@ -590,4 +613,5 @@ class QubitNetwork:
             )
 
         # return the mean of the fidelities
+        # return H
         return T.mean(fidelities)

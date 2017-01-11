@@ -1,7 +1,7 @@
 import numpy as np
-import qutip
-import utils
-from utils import chop, bigreal2complex, complex2bigreal
+# import qutip
+# import utils
+# from utils import chop, bigreal2complex, complex2bigreal
 
 
 def group_similar_elements(numbers, eps=1e-3):
@@ -20,6 +20,15 @@ def group_similar_elements(numbers, eps=1e-3):
             del indices_left[ir]
 
     return outlist
+
+
+def group_similar_interactions(net, eps=1e-3):
+    similar_indices = group_similar_elements(net.J.get_value())
+    groups = []
+    for indices_group in similar_indices:
+        group = [net.J_index_to_interaction(idx) for idx in indices_group]
+        groups.append(group)
+    return groups
 
 
 def vanishing_elements(net, eps=1e-4):
