@@ -225,7 +225,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # save results if appropriate parameters have been given
     conditionally_save()
 
-    if precompiled_functions is None:
-        return _net
-    else:
-        return _net, (train_model, test_model)
+    # if precompiled_functions is None:
+    #     return _net
+    # else:
+    #     return _net, (train_model, test_model)
