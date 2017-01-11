@@ -390,36 +390,29 @@ class QubitNetwork:
     def tuple_to_interaction_index(self, pair):
         self.interactions.index(pair)
 
-    def tuple_to_xs_factor(self, pair):
-        if not isinstance(pair, tuple):
-            raise TypeError('`pair` must be a tuple.')
+    # def tuple_to_xs_factor(self, pair):
+    #     if not isinstance(pair, tuple):
+    #         raise TypeError('`pair` must be a tuple.')
 
-        # if `pair` represents a self-interaction:
-        if isinstance(pair[0], int):
-            idx = self.tuple_to_xs_index(pair)
-            return self.hs_factors[idx]
-        # otherwise it should represent a pairwise interaction:
-        elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
-            idx = self.tuple_to_xs_index(pair)
-            return self.Js_factors[idx]
-        # otherwise fuck it
-        else:
-            raise ValueError('The first element of `pair` should be an integer'
-                             ' number representing a self-interaction, or a tu'
-                             'ple of two integer numbers, representing a pairw'
-                             'ise interaction')
+    #     # if `pair` represents a self-interaction:
+    #     if isinstance(pair[0], int):
+    #         idx = self.tuple_to_xs_index(pair)
+    #         return self.hs_factors[idx]
+    #     # otherwise it should represent a pairwise interaction:
+    #     elif isinstance(pair[0], tuple) and len(pair[0]) == 2:
+    #         idx = self.tuple_to_xs_index(pair)
+    #         return self.Js_factors[idx]
+    #     # otherwise fuck it
+    #     else:
+    #         raise ValueError('The first element of `pair` should be an integer'
+    #                          ' number representing a self-interaction, or a tu'
+    #                          'ple of two integer numbers, representing a pairw'
+    #                          'ise interaction')
 
-    def tuple_to_J_index(self, pair):
+    def tuple_to_J_index(self, interaction):
         if self.net_topology is None:
             # if `pair` is a self-interaction
-            if isinstance(pair[0], int):
-                return self.tuple_to_xs_index(pair)
-            # else we assume an interaction term
-            elif len(pair[0]) == 2:
-                return (self.num_self_interactions +
-                        self.tuple_to_xs_index(pair))
-            else:
-                raise ValueError('Invalid value for pair[0].')
+            self.interactions.index(interaction)
         else:
             raise NotImplementedError()
 

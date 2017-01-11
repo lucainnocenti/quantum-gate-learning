@@ -45,7 +45,7 @@ def load_network_from_file(infile):
 def transfer_J_values(source_net, target_net):
     source_J = source_net.J.get_value()
     target_J = target_net.J.get_value()
-    target_interactions = target_net.get_all_interactions()
+    target_interactions = target_net.interactions
 
     for idx, J in enumerate(source_J):
         interaction = source_net.J_index_to_interaction(idx)
