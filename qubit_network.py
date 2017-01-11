@@ -71,12 +71,13 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      print_fidelity=False):
 
     # parse the `net` parameter
+    print(isinstance(net, QubitNetwork))
     if net is None:
         _net = QubitNetwork(num_qubits=4,
                             interactions=('all', ['xx', 'yy', 'zz']),
                             self_interactions=('all', ['x', 'y', 'z']),
                             system_qubits=[0, 1, 2])
-    elif type(net) == QubitNetwork:
+    elif isinstance(net, QubitNetwork):
         # everything fine, move along
         _net = net
     elif isinstance(net, str):
