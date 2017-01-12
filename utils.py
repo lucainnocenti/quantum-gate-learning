@@ -4,10 +4,6 @@ import numpy as np
 import qutip
 
 
-# __all__ = ['complexrandn', 'complex2bigreal', 'get_sigmas_index',
-#            'generate_ss_terms', 'chars2pair']
-
-
 def complexrandn(dim1, dim2):
     """Generates an array of pseudorandom, normally chosen, complex numbers."""
     big_matrix = np.random.randn(dim1, dim2, 2)
