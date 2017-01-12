@@ -492,7 +492,7 @@ class QubitNetwork:
         # this builds the Hamiltonian of the system (in big real matrix
         # form), already multiplied with the 1j factor and ready for
         # exponentiation.
-        H = self.build_custom_H_factors()
+        H = self.build_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
         Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
@@ -501,8 +501,6 @@ class QubitNetwork:
         dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
         dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
 
-        # *col_fn* and *row_fn* are used inside *build_density_matrices*
-        # to compute the partial traces
         def col_fn(col_idx, row_idx, matrix):
             subm_dim = 2 ** self.num_ancillae
             return T.nlinalg.trace(
@@ -527,19 +525,26 @@ class QubitNetwork:
             sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillae),
             non_sequences=[dm_imag]
         )
-        dm_traced_r1 = T.concatenate(
-            (dm_real_traced, -dm_imag_traced),
-            axis=1
-        )
-        dm_traced_r2 = T.concatenate(
-            (dm_imag_traced, dm_real_traced),
-            axis=1
-        )
-        dm_traced = T.concatenate((dm_traced_r1, dm_traced_r2), axis=0)
 
-        fid = T.dot(target_state, T.dot(dm_traced, target_state))
+        target_state_real = target_state[:target_state.shape[0] // 2, None]
+        target_state_imag = target_state[target_state.shape[0] // 2:, None]
+        target_dm_real = (target_state_real * target_state_real.T +
+                          target_state_imag * target_state_imag.T)
+        target_dm_imag = (target_state_imag * target_state_real.T -
+                          target_state_real * target_state_imag.T)
 
-        return fid
+        prod_real = (T.dot(dm_real_traced, target_dm_real) -
+                     T.dot(dm_imag_traced, target_dm_imag))
+        tr_real = T.nlinalg.trace(prod_real)
+
+        # prod_imag = (T.dot(dm_real_traced, target_dm_imag) +
+        #              T.dot(dm_imag_traced, target_dm_real))
+        # tr_imag = T.nlinalg.trace(prod_imag)
+
+        # tr_abs = T.sqrt(tr_real ** 2 + tr_imag ** 2)
+
+        # guess we should show why this is correct?
+        return tr_real
 
     def fidelity(self, states, target_states):
         """This is the cost function of the model.
