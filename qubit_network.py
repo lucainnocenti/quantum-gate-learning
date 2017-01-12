@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import theano
 import theano.tensor as T
 from QubitNetwork import QubitNetwork
+import pickle
 
 
 def load_network_from_file(infile):
@@ -12,7 +13,7 @@ def load_network_from_file(infile):
     The QubitNetwork objects should have been stored into the file in
     pickle format, using the appropriate `save_to_file` method.
     """
-    import pickle
+
     with open(infile, 'rb') as file:
         data = pickle.load(file)
 
@@ -33,22 +34,31 @@ def load_network_from_file(infile):
     else:
         interactions = data['interactions']
 
-    if 'target_gate' in data.keys():
-        target_gate = data['target_gate']
-    else:
-        target_gate = None
+    if 'target_gate' not in data.keys():
+        data['target_gate'] = None
+
+    if 'net_topology' not in data.keys():
+        data['net_topology'] = None
 
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
         interactions=interactions,
         system_qubits=data['num_system_qubits'],
-        target_gate=target_gate,
+        target_gate=data['target_gate'],
+        net_topology=data['net_topology'],
         J=data['J']
     )
     return net
 
 
 def transfer_J_values(source_net, target_net):
+    """
+    Transfer the values of the intarctions in the source to the target.
+
+    All the interactions corresponding to the `J` values of `source_net`
+    are checked, and for those interactions that are also active in
+    `target_net` the corresponding `J` value is copied into `target_net`
+    """
     source_J = source_net.J.get_value()
     target_J = target_net.J.get_value()
     target_interactions = target_net.interactions
@@ -78,19 +88,18 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     # parse the `net` parameter
     # print(isinstance(net, QubitNetwork))
+    _net = None
     if net is None:
         _net = QubitNetwork(num_qubits=4,
                             interactions=('all', ['xx', 'yy', 'zz']),
                             self_interactions=('all', ['x', 'y', 'z']),
                             system_qubits=[0, 1, 2])
-    elif isinstance(net, QubitNetwork):
-        # everything fine, move along
-        _net = net
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         _net = load_network_from_file(net)
-    else:
-        raise ValueError('Invalid value for the argument `net`.')
+
+    if _net is None:
+        _net = net
 
     # parse `target_gate` parameter
     if target_gate is None:

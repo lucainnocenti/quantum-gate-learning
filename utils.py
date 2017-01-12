@@ -1,3 +1,5 @@
+from collections import OrderedDict
+import json
 import numpy as np
 import qutip
 
@@ -152,3 +154,10 @@ def chop(arr, eps=1e-3):
         arr.real[np.abs(arr.real) < eps] = 0.0
         arr.imag[np.abs(arr.imag) < eps] = 0.0
         return arr
+
+
+def print_OrderedDict(od):
+    outdict = OrderedDict()
+    for k, v in od.items():
+        outdict[str(k)] = v
+    print(json.dumps(outdict, indent=4))

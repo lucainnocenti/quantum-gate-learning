@@ -49,10 +49,9 @@ class QubitNetwork:
         # we store all the possible pairs for convenience
         self.pairs = list(itertools.combinations(range(self.num_qubits), 2))
 
-        if net_topology is None:
-            self.net_topology = None
-        else:
-            self.net_topology = OrderedDict(net_topology)
+        self.net_topology = net_topology
+        if net_topology is not None:
+            self.net_topology_symbols = sorted(set(self.net_topology.values()))
 
         # `parse_interactions` fills the `self.interactions`,
         # `self.num_interactions` and `self.num_self_interactions`
@@ -314,6 +313,7 @@ class QubitNetwork:
             'num_system_qubits': self.num_system_qubits,
             'interactions': self.interactions,
             'target_gate': self.target_gate,
+            'net_topology': self.net_topology,
             'J': self.J.get_value()
         }
         if not os.path.isabs(outfile):
@@ -385,10 +385,11 @@ class QubitNetwork:
                 # then we also remove the corresponding entry of
                 # `self.J`, in addition to removing the entry in
                 # `self.net_topology`
-                symbols = sorted(set(self.net_topology.values()))
+                symbols = self.net_topology_symbols
                 Js = self.J.get_value()
                 del Js[symbols.index(symbol)]
                 self.J.set_value(Js)
+                del self.net_topology_symbols[symbols.index(symbol)]
 
     def get_current_gate(self):
         """Returns the currently produced unitary, in complex form."""
@@ -396,6 +397,70 @@ class QubitNetwork:
         gate = scipy.linalg.expm(gate)
         gate = bigreal2complex(gate)
         return gate
+
+    def get_interactions_with_Js(self, renormalize_parameters=False):
+        """
+        Gives a dict associating each interaction to the correspoding J.
+
+        Parameters
+        ----------
+        renormalize_parameters : bool
+            If True, multiplies the pairwise interactions by 4 and the
+            self-interactions by 2.
+        """
+        if self.net_topology is None:
+            outdict = OrderedDict()
+            Js = self.J.get_value()
+            for interaction, J in zip(self.interactions, Js):
+                # if `renormalize_parameter` is set to True the results
+                # are printed using the convention in which the terms
+                # in the Hamiltonian are 1/4 for the pairwise
+                # interactions and 1/2 for the self-interactions.
+                if renormalize_parameters:
+                    if len(interaction[1]) == 2:
+                        outdict[interaction] = 4 * J
+                    elif len(interaction[1]) == 1:
+                        outdict[interaction] = 2 * J
+                else:
+                    outdict[interaction] = J
+            return outdict
+        else:
+            symbols = self.net_topology_symbols
+            outdict = OrderedDict()
+            Js = self.J.get_value()
+            for idx, symbol in enumerate(symbols):
+                interactions = []
+                renormalize = 0
+                for interaction, label in self.net_topology.items():
+                    if label == symbol:
+                        interactions.append(interaction)
+                        # the following mess is to check that it makes
+                        # sense to renormalize the parameters associated
+                        # with a symbol: if a symbol is associated to
+                        # both pairwise and self- interactions then we
+                        # cannot consistently renormalize the Js.
+                        if renormalize_parameters:
+                            if len(interaction[1]) == 2 and renormalize == 2:
+                                renormalize = 0
+                                print('Can\' properly renormalize the paramete'
+                                      'rs, reverting to non-renormalized form.'
+                                      )
+                            elif len(interaction[1]) == 1 and renormalize == 4:
+                                renormalize = 0
+                                print('Can\' properly renormalize the paramete'
+                                      'rs, reverting to non-renormalized form.'
+                                      )
+                            elif renormalize == 0:
+                                if len(interaction[1]) == 2:
+                                    renormalize = 4
+                                elif len(interaction[1]) == 1:
+                                    renormalize = 2
+
+                if not renormalize_parameters:
+                    renormalize = 1
+                outdict[tuple(interactions)] = Js[idx] * renormalize
+
+            return outdict
 
     def test_fidelity(self,
                       states=None, target_states=None,
