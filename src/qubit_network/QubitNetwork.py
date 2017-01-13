@@ -490,6 +490,22 @@ class QubitNetwork:
         )
         return fidelity()
 
+    def test_fidelity_without_theano(self):
+        """
+        Computes the fidelity using a random state, using only qutip.
+        """
+        gate = self.get_current_gate()
+        psi_in = qutip.rand_ket(2 ** self.num_system_qubits)
+        psi_in.dims = [
+            [2] * self.num_system_qubits, [1] * self.num_system_qubits]
+        Psi_in = qutip.tensor(psi_in, qutip.basis(2, 0))
+
+        Psi_out = gate * Psi_in
+        dm_out = Psi_out.ptrace([0, 1, 2])
+
+        return (psi_in.dag() * self.target_gate.dag() * dm_out *
+                self.target_gate * psi_in)
+
     # `fidelity_1s` should be to compute the fidelity over a single pair
     # of state and target state, as opposite as the computation of the
     # average (using `theano.scan`) as done by `fidelity`.
