@@ -317,7 +317,7 @@ class QubitNetwork:
             'J': self.J.get_value()
         }
         if not os.path.isabs(outfile):
-            outfile = os.path.join(os.path.dirname(__file__), outfile)
+            outfile = os.path.join(os.getcwd(), outfile)
         with open(outfile, 'wb') as file:
             pickle.dump(data, file)
 
