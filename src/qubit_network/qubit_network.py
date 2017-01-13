@@ -3,8 +3,10 @@ import matplotlib.pyplot as plt
 # import qutip
 import theano
 import theano.tensor as T
-from QubitNetwork import QubitNetwork
 import pickle
+
+# package imports
+from .QubitNetwork import QubitNetwork
 
 
 def load_network_from_file(infile):

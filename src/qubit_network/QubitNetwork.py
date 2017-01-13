@@ -395,12 +395,15 @@ class QubitNetwork:
                 self.J.set_value(Js)
                 del self.net_topology_symbols[symbols.index(symbol)]
 
-    def get_current_gate(self):
+    def get_current_gate(self, return_Qobj=True):
         """Returns the currently produced unitary, in complex form."""
         gate = self.build_H_factors(symbolic_result=False)
         gate = scipy.linalg.expm(gate)
         gate = bigreal2complex(gate)
-        return gate
+        if return_Qobj:
+            return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
+        else:
+            return gate
 
     def get_interactions_with_Js(self, renormalize_parameters=False):
         """
