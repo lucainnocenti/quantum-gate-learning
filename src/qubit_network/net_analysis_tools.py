@@ -66,3 +66,59 @@ def project_ancillae(net, ancillae_state):
         [qutip.qeye(2) for _ in range(net.num_system_qubits)])
     proj = qutip.tensor(identity_over_system, ancillae_proj)
     return proj * gate * proj
+
+
+def plot_fidelity_vs_J_live(net, xs, index_to_vary,
+                            states=None, target_states=None,
+                            n_states=5):
+    import matplotlib.pyplot as plt
+    import theano
+
+    if states is None or target_states is None:
+        states, target_states = net.generate_training_data(size=n_states)
+
+    Js = net.J.get_value()
+
+    fig, ax = plt.subplots(1, 1)
+    fidelities = np.zeros(shape=(len(states), len(xs)))
+    for state_idx, (state, target_state) in enumerate(
+            zip(states, target_states)):
+        compute_fidelity = theano.function(
+            inputs=[], outputs=net.fidelity_1s(state, target_state))
+
+        for idx, x in enumerate(xs):
+            new_Js = Js[:]
+            new_Js[index_to_vary] = x
+            net.J.set_value(new_Js)
+
+            fidelities[state_idx, idx] = compute_fidelity()
+
+        ax.plot(xs, fidelities[state_idx])
+        fig.canvas.draw()
+
+
+def fidelity_vs_J(net):
+    import copy
+    import theano
+    import theano.tensor as T
+
+    _net = copy.copy(net)
+    xs = T.dvector('xs')
+    states = T.dmatrix('states')
+    target_states = T.dmatrix('target_states')
+    index_to_vary = T.iscalar('index_to_vary')
+
+    def foreach_x(x, index_to_vary, states, target_states):
+        _net.J = T.set_subtensor(_net.J[index_to_vary], x)
+        return _net.fidelity(states, target_states, return_mean=False)
+
+    results, _ = theano.scan(
+        fn=foreach_x,
+        sequences=xs,
+        non_sequences=[index_to_vary, states, target_states]
+    )
+    fidelities = results.T
+    return theano.function(
+        inputs=[states, target_states, xs, index_to_vary],
+        outputs=fidelities
+    )

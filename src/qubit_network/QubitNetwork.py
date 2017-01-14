@@ -191,7 +191,15 @@ class QubitNetwork:
 
         return complex2bigreal(-1j * qutip.tensor(term).data.toarray())
 
-    def build_H_factors(self, symbolic_result=True):
+    def build_H_factors(self, symbolic_result=True, J=None):
+        if J is None:
+            if symbolic_result:
+                _J = self.J
+            else:
+                _J = self.J.get_value()
+        else:
+            _J = J
+
         dim_real_space = 2 * 2 ** self.num_qubits
         if self.net_topology is None:
 
@@ -205,9 +213,9 @@ class QubitNetwork:
             if symbolic_result:
                 # return the dot product between `self.J` and `factors`,
                 # amounting to the sum over `i` of `self.J[i] * factors[i]`
-                return T.tensordot(self.J, factors, axes=1)
+                return T.tensordot(_J, factors, axes=1)
             else:
-                return np.tensordot(self.J.get_value(), factors, axes=1)
+                return np.tensordot(_J, factors, axes=1)
         else:
             # the expected form of `self.net_topology` is a dictionary like
             # the following:
@@ -244,9 +252,9 @@ class QubitNetwork:
                         factors[idx] += self.build_H_factor(pair)
 
             if symbolic_result:
-                return T.tensordot(self.J, factors, axes=1)
+                return T.tensordot(_J, factors, axes=1)
             else:
-                return np.tensordot(self.J.get_value(), factors, axes=1)
+                return np.tensordot(_J, factors, axes=1)
 
     def build_ancilla_state(self):
         """Returns an initial ancilla state, as a qutip.Qobj object.
@@ -257,7 +265,7 @@ class QubitNetwork:
                               for _ in range(self.num_ancillae)])
         return state
 
-    def generate_training_data(self, target_unitary, size):
+    def generate_training_data(self, target_gate=None, size=10):
         """Generates a set of training data for the QubitNetwork net.
 
         Returns
@@ -279,6 +287,10 @@ class QubitNetwork:
 
         system_size = 2 ** self.num_system_qubits
 
+        if target_gate is None:
+            if self.target_gate is None:
+                raise ValueError('No target gate has been specified.')
+            target_gate = self.target_gate
         # generate a number `size` of normalized vectors, each one of
         # length `self.num_system_qubits`.
         training_states = [qutip.rand_ket(system_size) for _ in range(size)]
@@ -288,10 +300,10 @@ class QubitNetwork:
             training_states[idx].dims = qutip_dims
 
         # evolve all training states
-        if not isinstance(target_unitary, qutip.Qobj):
-            raise TypeError('`target_unitary` should be a qutip object.')
+        if not isinstance(target_gate, qutip.Qobj):
+            raise TypeError('`target_gate` should be a qutip object.')
 
-        target_states = [target_unitary * psi for psi in training_states]
+        target_states = [target_gate * psi for psi in training_states]
 
         # now compute the tensor product between every element of
         # `target_states` and the ancillae state, IF there are ancillae
@@ -332,7 +344,7 @@ class QubitNetwork:
             # if `pair` is a self-interaction
             return self.interactions.index(interaction)
         else:
-            raise NotImplementedError()
+            raise NotImplementedError('I didn\'t implement this yet, sorry!')
 
     def J_index_to_interaction(self, index):
         """
@@ -509,13 +521,12 @@ class QubitNetwork:
     # `fidelity_1s` should be to compute the fidelity over a single pair
     # of state and target state, as opposite as the computation of the
     # average (using `theano.scan`) as done by `fidelity`.
-    # I never actually used this so it probably doesn't work.
-    def fidelity_1s(self, state, target_state):
-        """UNTESTED, UNFINISHED"""
+    def fidelity_1s(self, state, target_state, J=None):
+        """Compute the fidelity from a single pair of states."""
         # this builds the Hamiltonian of the system (in big real matrix
         # form), already multiplied with the 1j factor and ready for
         # exponentiation.
-        H = self.build_H_factors()
+        H = self.build_H_factors(symbolic_result=True, J=J)
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
         Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
@@ -569,7 +580,7 @@ class QubitNetwork:
         # guess we should show why this is correct?
         return tr_real
 
-    def fidelity(self, states, target_states):
+    def fidelity(self, states, target_states, return_mean=True):
         """The cost function of the model.
 
         The states given in `states` are evolved through the network
@@ -599,13 +610,16 @@ class QubitNetwork:
             Every state is expected to span the *whole* qubit network,
             thus having a length of 2 * (2 ** self.num_qubits).
 
-        target_states: numpy array, shape (n_states, dim_target_states)
+        target_states : numpy array, shape (n_states, dim_target_states)
             The ideal result to which to compare the elements of
             `states`.
             Every state in `target_states` is expected to be the result
             of evolving the corresponding state in `states` with the
             target gate that the training is trying to make the network
             implement.
+        return_mean : bool
+            If True, returns the average values of the fidelities.
+            If False, returns the computed array of fidelities
 
         Returns
         -------
@@ -722,5 +736,8 @@ class QubitNetwork:
                 non_sequences=[expH_times_state, target_states]
             )
 
-        # return the mean of the fidelities
-        return T.mean(fidelities)
+        if return_mean:
+            # return the mean of the fidelities
+            return T.mean(fidelities)
+        else:
+            return fidelities
