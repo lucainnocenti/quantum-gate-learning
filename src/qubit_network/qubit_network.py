@@ -88,8 +88,11 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      precompiled_functions=None,
                      print_fidelity=False):
 
-    # parse the `net` parameter
-    # print(isinstance(net, QubitNetwork))
+    # -------- OPTIONS PARSING --------
+
+    # Parse the `net` parameter.
+    # `net` is the argument obtained from the interface,
+    # `_net` is the variable used in the function (usually derived from `net`)
     _net = None
     if net is None:
         _net = QubitNetwork(num_qubits=4,
@@ -124,8 +127,13 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             _net.save_to_file(saveafter_file)
             print('Network saved in {}'.format(saveafter_file))
 
+    # -------- DATA GENERATION AND PREPARATION --------
+
     print('Generating training data...')
 
+    # `generate_training_data` outputs a pair, the first element of which
+    # is a list of states spanning the system qubits, while the second
+    # element is a list of states spanning only
     dataset = _net.generate_training_data(target_gate, training_dataset_size)
     states = theano.shared(
         np.asarray(dataset[0], dtype=theano.config.floatX)
@@ -141,6 +149,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     test_target_states = theano.shared(
         np.asarray(test_dataset[1], dtype=theano.config.floatX)
     )
+
+    # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBGD --------
 
     print('Building the model...')
 
@@ -166,6 +176,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # (variable, update expression) pairs
     updates = [(_net.J, _net.J + _learning_rate * g_J)]
 
+    # Theoretically it should be possible to reuse already compiled
+    # computational graph, but I didn't really test this functionality yet.
     if precompiled_functions is None:
         # compile the training function `train_model`, that while computing
         # the cost at every iteration (batch), also updates the weights of
@@ -180,6 +192,10 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             }
         )
 
+        # `test_model` is used to test the fidelity given by the currently
+        # trained parameters. It's called at regular intervals during
+        # the computation, and is the value shown in the dynamically
+        # update plot that is shown when the training is ongoing.
         test_model = theano.function(
             inputs=[],
             outputs=cost,
@@ -192,11 +208,17 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     else:
         train_model, test_model = precompiled_functions
 
+    # -------- DO THE ACTUAL MAXIMIZATION --------
+
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
     fids_history = []
     fig, ax = plt.subplots(1, 1)
 
+    # The try-except block allows to stop the computation with ctrl-C
+    # without losing all the computed data. This effectively makes it
+    # possible to stop the computation at any moment saving all the data
+    # like it would have happened were the computation ended on its own.
     try:
         for n_epoch in range(n_epochs):
             if print_fidelity:
