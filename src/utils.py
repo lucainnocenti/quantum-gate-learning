@@ -134,11 +134,8 @@ def detensorize(bigm):
     return out
 
 
-def normalize_topleft_phase(matrix):
-    return matrix * np.exp(-1j * np.angle(matrix[0, 0]))
 
-
-def chop(arr, eps=1e-3):
+def chop(arr, eps=1e-5):
     if isinstance(arr, qutip.Qobj):
         _arr = arr.data.toarray()
         _arr.real[np.abs(_arr.real) < eps] = 0.0
@@ -150,6 +147,10 @@ def chop(arr, eps=1e-3):
         arr.real[np.abs(arr.real) < eps] = 0.0
         arr.imag[np.abs(arr.imag) < eps] = 0.0
         return arr
+
+
+def transpose(list_of_lists):
+    return list(map(list, zip(*list_of_lists)))
 
 
 def print_OrderedDict(od):
