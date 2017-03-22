@@ -72,13 +72,22 @@ def project_ancillae(net, ancillae_state):
     return proj * gate * proj
 
 
-def plot_gate(net, norm_phase=True, permutation=None):
+def plot_gate(net, norm_phase=True, permutation=None, func='abs'):
     gate = net.get_current_gate(return_Qobj=True)
     if permutation is not None:
         gate = gate.permute(permutation)
         gate = normalize_phase(gate)
 
-    gate = abs(gate.data.toarray())
+    gate = gate.data.toarray()
+
+    if func == 'abs':
+        gate = np.abs(gate)
+    elif func == 'real':
+        gate = np.real(gate)
+    elif func == 'imag':
+        gate = np.imag(gate)
+    else:
+        raise ValueError('The possible values are abs, real, imag.')
 
     f, ax = plt.subplots(figsize=(10, 10))
     ax = sns.heatmap(gate,
