@@ -9,7 +9,7 @@ import theano
 import theano.tensor as T
 import theano.tensor.slinalg  # for expm()
 import theano.tensor.nlinalg  # for trace()
-from utils import chars2pair, complex2bigreal, bigreal2complex
+from utils import chars2pair, complex2bigreal, bigreal2complex, chop
 
 
 class QubitNetwork:
@@ -409,11 +409,14 @@ class QubitNetwork:
                 self.J.set_value(Js)
                 del self.net_topology_symbols[symbols.index(symbol)]
 
-    def get_current_gate(self, return_Qobj=True):
+    def get_current_gate(self, return_Qobj=True, chop_eps=None):
         """Returns the currently produced unitary, in complex form."""
         gate = self.build_H_factors(symbolic_result=False)
         gate = scipy.linalg.expm(gate)
         gate = bigreal2complex(gate)
+        if chop_eps is not None:
+            gate = chop(gate, chop_eps)
+
         if return_Qobj:
             return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
         else:
