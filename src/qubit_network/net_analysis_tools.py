@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import qutip
 
 from utils import chop
@@ -68,6 +70,22 @@ def project_ancillae(net, ancillae_state):
         [qutip.qeye(2) for _ in range(net.num_system_qubits)])
     proj = qutip.tensor(identity_over_system, ancillae_proj)
     return proj * gate * proj
+
+
+def plot_gate(net, norm_phase=True, permutation=None):
+    gate = net.get_current_gate(return_Qobj=True)
+    if permutation is not None:
+        gate = gate.permute(permutation)
+        gate = normalize_phase(gate)
+
+    gate = abs(gate.data.toarray())
+
+    f, ax = plt.subplots(figsize=(10, 10))
+    ax = sns.heatmap(gate,
+                     square=True, annot=True, fmt='1.2f',
+                     linewidth=1, cbar=False)
+    ax.hlines([8], *ax.get_xlim())
+    ax.vlines([8], *ax.get_ylim())
 
 
 # ----------------------------------------------------------------
