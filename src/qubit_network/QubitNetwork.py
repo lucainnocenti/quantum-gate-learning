@@ -506,7 +506,7 @@ class QubitNetwork:
 
     def test_fidelity_without_theano(self):
         """
-        Computes the fidelity using a random state, using only qutip.
+        Computes the fidelity with random states, using only qutip.
 
         This function can be used to double check the output given in the
         optimization process. The whole computation is here done using
