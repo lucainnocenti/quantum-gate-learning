@@ -72,7 +72,10 @@ def project_ancillae(net, ancillae_state):
     return proj * gate * proj
 
 
-def plot_gate(net, norm_phase=True, permutation=None, func='abs'):
+def plot_gate(net,
+              norm_phase=True, permutation=None, func='abs',
+              fmt='1.2f', annot=True, cbar=False,
+              hvlines=None):
     gate = net.get_current_gate(return_Qobj=True)
     if permutation is not None:
         gate = gate.permute(permutation)
@@ -91,10 +94,12 @@ def plot_gate(net, norm_phase=True, permutation=None, func='abs'):
 
     f, ax = plt.subplots(figsize=(10, 10))
     ax = sns.heatmap(gate,
-                     square=True, annot=True, fmt='1.2f',
-                     linewidth=1, cbar=False)
-    ax.hlines([8], *ax.get_xlim())
-    ax.vlines([8], *ax.get_ylim())
+                     square=True, annot=annot, fmt=fmt,
+                     linewidth=1, cbar=cbar)
+
+    if hvlines is not None:
+        ax.hlines(hvlines, *ax.get_xlim())
+        ax.vlines(hvlines, *ax.get_ylim())
 
 
 # ----------------------------------------------------------------

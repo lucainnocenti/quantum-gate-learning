@@ -516,13 +516,15 @@ class QubitNetwork:
         high level `qutip` functions.
         """
         gate = self.get_current_gate()
-        psi_in = qutip.rand_ket(2 ** self.num_system_qubits)
+        psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
         psi_in.dims = [
             [2] * self.num_system_qubits, [1] * self.num_system_qubits]
-        Psi_in = qutip.tensor(psi_in, qutip.basis(2, 0))
+
+        Psi_in = qutip.tensor(psi_in, self.ancillae_state)
 
         Psi_out = gate * Psi_in
-        dm_out = Psi_out.ptrace([0, 1, 2])
+
+        dm_out = Psi_out.ptrace(range(self.num_system_qubits))
 
         return (psi_in.dag() * self.target_gate.dag() * dm_out *
                 self.target_gate * psi_in)
