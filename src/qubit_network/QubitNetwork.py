@@ -318,25 +318,48 @@ class QubitNetwork:
 
         return np.asarray(training_states), np.asarray(target_states)
 
-    def save_to_file(self, outfile):
-        """ Saves the currently trained net in a file. """
-        import pickle
-        data = {
-            'num_qubits': self.num_qubits,
-            'num_system_qubits': self.num_system_qubits,
-            'interactions': self.interactions,
-            'target_gate': self.target_gate,
-            'net_topology': self.net_topology,
-            'J': self.J.get_value()
-        }
-        if not os.path.isabs(outfile):
-            outfile = os.path.join(os.getcwd(), outfile)
-        with open(outfile, 'wb') as file:
-            pickle.dump(data, file)
+    def save_to_file(self, outfile, fmt='pickle'):
+        """ Saves the currently trained net in a file.
 
-    def save_gate_to_file(self, outfile):
-        """ Prints the target get of the net to a file (for debug). """
-        np.savetxt(outfile, self.get_current_gate(), delimiter=',')
+        Parameters
+        ----------
+        fmt : Format of output file.
+            Possible values are 'pickle' and 'json'.
+        """
+        if fmt == 'pickle':
+            import pickle
+            data = {
+                'num_qubits': self.num_qubits,
+                'num_system_qubits': self.num_system_qubits,
+                'interactions': self.interactions,
+                'target_gate': self.target_gate,
+                'net_topology': self.net_topology,
+                'J': self.J.get_value()
+            }
+            if not os.path.isabs(outfile):
+                outfile = os.path.join(os.getcwd(), outfile)
+            with open(outfile, 'wb') as file:
+                pickle.dump(data, file)
+        elif fmt == 'json':
+            import json
+
+            data = dict()
+            current_gate = self.get_current_gate().data.toarray()
+            target_gate = self.target_gate.data.toarray()
+
+            data['full_unitary.real'] = current_gate.real.tolist()
+            data['full_unitary.imag'] = current_gate.imag.tolist()
+            data['target_gate.real'] = target_gate.real.tolist()
+            data['target_gate.imag'] = target_gate.imag.tolist()
+
+            data['num_qubits'] = self.num_qubits
+            data['num_system_qubits'] = self.num_system_qubits
+            data['net_topology'] = self.net_topology
+            data['interactions'] = self.interactions
+            data['interactions_values'] = self.J.get_value().tolist()
+
+            with open(outfile, 'w') as fp:
+                json.dump(data, fp)
 
     # def tuple_to_interaction_index(self, pair):
     #     self.interactions.index(pair)
