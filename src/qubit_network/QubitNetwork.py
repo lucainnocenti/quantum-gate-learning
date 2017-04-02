@@ -344,22 +344,41 @@ class QubitNetwork:
             import json
 
             data = dict()
-            current_gate = self.get_current_gate().data.toarray()
-            target_gate = self.target_gate.data.toarray()
 
+            current_gate = self.get_current_gate().data.toarray()
             data['full_unitary.real'] = current_gate.real.tolist()
             data['full_unitary.imag'] = current_gate.imag.tolist()
-            data['target_gate.real'] = target_gate.real.tolist()
-            data['target_gate.imag'] = target_gate.imag.tolist()
+
+            # old saved nets did not have the target_gate attribute, so we have
+            # to check for its existence to avoid errors later. Also, it is
+            # messy to reload complex numbers from the json dumped data, so
+            # we save real and imaginary parts separately.
+            if self.target_gate:
+                target_gate = self.target_gate.data.toarray()
+                data['target_gate.real'] = target_gate.real.tolist()
+                data['target_gate.imag'] = target_gate.imag.tolist()
+            else:
+                data['target_gate.real'] = None
+                data['target_gate.imag'] = None
 
             data['num_qubits'] = self.num_qubits
             data['num_system_qubits'] = self.num_system_qubits
-            data['net_topology'] = self.net_topology
+
+            # json.dump cannot serialize dictionaries with tuples as keys, so
+            # we have to stringify them. To restore the original keys we can
+            # later use `eval`.
+            if self.net_topology:
+                net_topology = OrderedDict(
+                    (str(k), v) for k, v in self.net_topology.items())
+            else:
+                net_topology = self.net_topology
+            data['net_topology'] = net_topology
+
             data['interactions'] = self.interactions
-            data['interactions_values'] = self.J.get_value().tolist()
+            data['J'] = self.J.get_value().tolist()
 
             with open(outfile, 'w') as fp:
-                json.dump(data, fp)
+                json.dump(data, fp, indent=4)
 
     # def tuple_to_interaction_index(self, pair):
     #     self.interactions.index(pair)
@@ -696,7 +715,7 @@ class QubitNetwork:
         # following `theano.scan`. It returns the fidelity between the
         # result of evolving `states[i]` and `target_states[i]`.
         def compute_fidelities(i, matrix, target_states):
-            # here matrix[i] is the i-th training state after evolution
+            # Here matrix[i] is the i-th training state after evolution
             # through exp(-1j * H)
             Uxpsi = matrix[i].reshape((matrix[i].shape[0], 1))
             Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
