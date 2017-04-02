@@ -549,27 +549,34 @@ class QubitNetwork:
         )
         return fidelity()
 
-    def test_fidelity_without_theano(self):
+    def test_fidelity_without_theano(self, n_samples=10):
         """
-        Computes the fidelity with random states, using only qutip.
+        Computes the fidelity with random states, using only `qutip` functions.
 
         This function can be used to double check the output given in the
         optimization process. The whole computation is here done using
         high level `qutip` functions.
         """
         gate = self.get_current_gate()
-        psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
-        psi_in.dims = [
-            [2] * self.num_system_qubits, [1] * self.num_system_qubits]
-
-        Psi_in = qutip.tensor(psi_in, self.ancillae_state)
-
-        Psi_out = gate * Psi_in
-
-        dm_out = Psi_out.ptrace(range(self.num_system_qubits))
-
-        return (psi_in.dag() * self.target_gate.dag() * dm_out *
-                self.target_gate * psi_in)
+        # each element of `fidelities` will contain the fidelity obtained with
+        # a single randomly generated input state
+        fidelities = np.zeros(n_samples)
+        for idx in range(fidelities.shape[0]):
+            # generate random input state (over system qubits only)
+            psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
+            psi_in.dims = [
+                [2] * self.num_system_qubits, [1] * self.num_system_qubits]
+            # embed it into the bigger system+ancilla space
+            Psi_in = qutip.tensor(psi_in, self.ancillae_state)
+            # evolve input state
+            Psi_out = gate * Psi_in
+            # trace out ancilla
+            dm_out = Psi_out.ptrace(range(self.num_system_qubits))
+            # compute fidelity
+            fidelity = (psi_in.dag() * self.target_gate.dag() *
+                        dm_out * self.target_gate * psi_in)
+            fidelities[idx] = fidelity[0, 0].real
+        return fidelities.mean()
 
     # `fidelity_1s` computes the fidelity over a single pair
     # of state and target state, as opposite as the computation of the
