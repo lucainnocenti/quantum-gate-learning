@@ -331,6 +331,7 @@ class QubitNetwork:
             data = {
                 'num_qubits': self.num_qubits,
                 'num_system_qubits': self.num_system_qubits,
+                'ancillae_state': self.ancillae_state,
                 'interactions': self.interactions,
                 'target_gate': self.target_gate,
                 'net_topology': self.net_topology,
@@ -348,6 +349,10 @@ class QubitNetwork:
             current_gate = self.get_current_gate().data.toarray()
             data['full_unitary.real'] = current_gate.real.tolist()
             data['full_unitary.imag'] = current_gate.imag.tolist()
+
+            ancillae_state = self.ancillae_state.data.toarray()
+            data['ancillae_state.real'] = ancillae_state.real.tolist()
+            data['ancillae_state.imag'] = ancillae_state.imag.tolist()
 
             # old saved nets did not have the target_gate attribute, so we have
             # to check for its existence to avoid errors later. Also, it is
@@ -549,7 +554,7 @@ class QubitNetwork:
         )
         return fidelity()
 
-    def test_fidelity_without_theano(self, n_samples=10):
+    def test_fidelity_without_theano(self, target_gate=None, n_samples=10):
         """
         Computes the fidelity with random states, using only `qutip` functions.
 
@@ -558,6 +563,11 @@ class QubitNetwork:
         high level `qutip` functions.
         """
         gate = self.get_current_gate()
+        if target_gate is None:
+            if self.target_gate is None:
+                raise ValueError('No target gate has been specified')
+            else:
+                target_gate = self.target_gate
         # each element of `fidelities` will contain the fidelity obtained with
         # a single randomly generated input state
         fidelities = np.zeros(n_samples)
@@ -573,8 +583,8 @@ class QubitNetwork:
             # trace out ancilla
             dm_out = Psi_out.ptrace(range(self.num_system_qubits))
             # compute fidelity
-            fidelity = (psi_in.dag() * self.target_gate.dag() *
-                        dm_out * self.target_gate * psi_in)
+            fidelity = (psi_in.dag() * target_gate.dag() *
+                        dm_out * target_gate * psi_in)
             fidelities[idx] = fidelity[0, 0].real
         return fidelities.mean()
 
