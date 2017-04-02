@@ -19,23 +19,6 @@ def load_network_from_file(infile):
     with open(infile, 'rb') as file:
         data = pickle.load(file)
 
-    # the interface was recently changed and `active_hs` and `active_Js`
-    # aren't class attributes anymore. Instead the interactions are all
-    # stored into the `QubitNetwork.interactions` attribute.
-    # Nevertheless some networks were saved with the old interace so
-    # we need to handle these cases appropriately
-    if 'active_Js' in data.keys():
-        interactions = []
-        for qubit, dirs in data['active_hs'].items():
-            for d in dirs:
-                interactions.append((qubit, d))
-
-        for pair, dirs in data['active_Js'].items():
-            for d in dirs:
-                interactions.append((pair, d))
-    else:
-        interactions = data['interactions']
-
     if 'target_gate' not in data.keys():
         data['target_gate'] = None
 
@@ -44,7 +27,7 @@ def load_network_from_file(infile):
 
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
-        interactions=interactions,
+        interactions=data['interactions'],
         system_qubits=data['num_system_qubits'],
         target_gate=data['target_gate'],
         net_topology=data['net_topology'],
