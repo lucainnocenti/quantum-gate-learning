@@ -290,6 +290,7 @@
         ]
     ],
     "num_qubits": 4,
+    "num_system_qubits": 3,
     "J": [
         3.876600430067815,
         1.8552332358431212,
@@ -396,7 +397,14 @@
             0.0
         ]
     ],
-    "num_system_qubits": 3,
+    "ancillae_state.imag": [
+        [
+            0.0
+        ],
+        [
+            0.0
+        ]
+    ],
     "full_unitary.imag": [
         [
             0.6821329999401965,
@@ -685,6 +693,14 @@
             0.0,
             0.0,
             0.730034577365589
+        ]
+    ],
+    "ancillae_state.real": [
+        [
+            1.0
+        ],
+        [
+            0.0
         ]
     ],
     "target_gate.real": [
