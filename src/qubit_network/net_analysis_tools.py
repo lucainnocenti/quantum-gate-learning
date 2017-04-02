@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -70,6 +71,30 @@ def project_ancillae(net, ancillae_state):
         [qutip.qeye(2) for _ in range(net.num_system_qubits)])
     proj = qutip.tensor(identity_over_system, ancillae_proj)
     return proj * gate * proj
+
+
+def resave_all_pickle_as_json(path=None):
+    """Take all .pickle saved file in path and resave them as .json files."""
+    import glob
+    import qubit_network as qn
+
+    if path is None:
+        path = r'../data/nets/'
+
+    all_nets = glob.glob(path + '*')
+    for net_path in all_nets:
+        net_name, net_ext = os.path.splitext(net_path)
+        if (net_ext == '.pickle') and (net_name + '.json' not in all_nets):
+            try:
+                net = qn.load_network_from_file(net_path)
+                net.save_to_file(net_name + '.json', fmt='json')
+            except:
+                print('Error while handling {}'.format(net_path))
+                raise
+
+# ----------------------------------------------------------------
+# Display gate matrices.
+# ----------------------------------------------------------------
 
 
 def plot_gate(net,
