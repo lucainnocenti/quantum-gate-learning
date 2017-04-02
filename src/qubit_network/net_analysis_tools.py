@@ -72,9 +72,13 @@ def project_ancillae(net, ancillae_state):
     proj = qutip.tensor(identity_over_system, ancillae_proj)
     return proj * gate * proj
 
+# ----------------------------------------------------------------
+# Get info and organize saved nets
+# ----------------------------------------------------------------
+
 
 def resave_all_pickle_as_json(path=None):
-    """Take all .pickle saved file in path and resave them as .json files."""
+    """Take all `.pickle` files in `path` and resave them as `json` files."""
     import glob
     import qubit_network as qn
 
@@ -101,7 +105,23 @@ def plot_gate(net,
               norm_phase=True, permutation=None, func='abs',
               fmt='1.2f', annot=True, cbar=False,
               hvlines=None):
-    gate = net.get_current_gate(return_Qobj=True)
+    """Pretty-print the matrix of the currently implemented gate.
+
+    Parameters
+    ----------
+    net : QubitNetwork or matrix_like, optional
+        If `net` is a `QubitNetwork` instance, than `net.get_current_gate` is
+        used to extract the matrix of the implemented gate.
+        In instead `net` is given dircetly as a matrix, we only plot it with
+        a nice formatting.
+    """
+    try:
+        gate = net.get_current_gate(return_Qobj=True)
+    except AttributeError:
+        # if `net` does not have the `get_current_gate` method it is assumed
+        # to be the matrix to be plotted.
+        gate = net
+
     if permutation is not None:
         gate = gate.permute(permutation)
         gate = normalize_phase(gate)
