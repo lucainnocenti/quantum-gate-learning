@@ -1,6 +1,14 @@
+"""Functions to process and modify content of `QubitNetwork` objects.
+
+This module contains a list of functions specifically aimed to work with
+`QubitNetwork` objects. It differs from `net_analysis_tools` in that the
+methods in this module write or modify data saved in `QubitNetwork` objects,
+rather than just reading and analysing it.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
-# import qutip
+import qutip
 import theano
 import theano.tensor as T
 import pickle
@@ -25,10 +33,16 @@ def load_network_from_file(infile):
     if 'net_topology' not in data.keys():
         data['net_topology'] = None
 
+    if 'ancillae_state' not in data.keys():
+        num_ancillae = data['num_qubits'] - data['num_system_qubits']
+        data['ancillae_state'] = qutip.tensor([
+            qutip.basis(2, 0) for _ in range(num_ancillae)])
+
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
         interactions=data['interactions'],
         system_qubits=data['num_system_qubits'],
+        ancillae_state=data['ancillae_state'],
         target_gate=data['target_gate'],
         net_topology=data['net_topology'],
         J=data['J']
