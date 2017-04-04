@@ -154,6 +154,24 @@ def plot_gate(net,
 def plot_fidelity_vs_J_live(net, xs, index_to_vary,
                             states=None, target_states=None,
                             n_states=5):
+    """Plot the variation of the fidelity with an interaction parameter.
+
+    Given an input `QubitNetwork` object, a sample of random input states is
+    generated, and on each of them the fidelity is computed as a function of
+    one of the interaction parameters.
+    The resulting plot is updated every time the graph of a state is completed.
+
+    Examples
+    --------
+    Load a pre-trained network from file, and plot the fidelity for a number
+    of random input states as a function of the fifth interaction parameter
+    `net.J[4]`, testing its values from -20 to 20 at intervals of 0.05:
+    >>> import qubit_network as qn
+    >>> import net_analysis_tools as nat
+    >>> net = qn.load_network_from_file('path/to/net.pickle')
+    >>> nat.plot_fidelity_vs_J_live(net, np.arange(-20, 20, 0.05), 4)
+    <output graphics object>
+    """
     import matplotlib.pyplot as plt
     import theano
 
@@ -181,6 +199,37 @@ def plot_fidelity_vs_J_live(net, xs, index_to_vary,
 
 
 def fidelity_vs_J(net):
+    """Return a theano function that generates a fidelity vs interaction plot.
+
+    This function differs from `plot_fidelity_vs_J_live` in that it does not
+    directly compute values of the fidelity. Instead, it compiles and returns
+    a `theano.function` object that, given as input a set of input states and
+    corresponding target states, which interaction parameter to vary and the
+    variation range, returns the set of values of the fidelities to plot.
+
+    It is also worth noting that this function does not handle at all the
+    actual drawing of the output plot. It only compiles a function to be used
+    for such a plot.
+
+    Examples
+    --------
+    Load a network from file, use `fidelity_vs_J` to compile the function to
+    compute the fidelities for various states, and use it to plot the fidelity
+    for various states when varying the fifth interaction parameter `net.J[4]`
+    in the range `np.arange(-40, 40, 0.05)`.
+    >>> import qubit_network as qn
+    >>> import net_analysis_tools as nat
+    >>> net = qn.load_network_from_file('path/to/net.pickle')
+    >>> plots_generator = nat.fidelity_vs_J(net)
+    >>> states, target_states = net.generate_training_data(net.target_gate, 10)
+    >>> xs = np.arange(-40, 40, 0.05)
+    >>> fidelities = plots_generator(states, target_states, xs, 4)
+    >>> fig, ax = plt.subplots(1, 1)
+    >>> for fids in fidelities:
+    >>>     ax.plot(xs, fids)
+    >>>     fig.canvas.draw()
+    >>> <output graphics object>
+    """
     import copy
     import theano
     import theano.tensor as T
