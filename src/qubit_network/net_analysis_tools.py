@@ -172,25 +172,27 @@ def plot_fidelity_vs_J_live(net, xs, index_to_vary,
     >>> nat.plot_fidelity_vs_J_live(net, np.arange(-20, 20, 0.05), 4)
     <output graphics object>
     """
+    import copy
     import matplotlib.pyplot as plt
     import theano
 
     if states is None or target_states is None:
         states, target_states = net.generate_training_data(size=n_states)
 
-    Js = net.J.get_value()
+    _net = copy.copy(net)
+    Js = _net.J.get_value()
 
     fig, ax = plt.subplots(1, 1)
     fidelities = np.zeros(shape=(len(states), len(xs)))
     for state_idx, (state, target_state) in enumerate(
             zip(states, target_states)):
         compute_fidelity = theano.function(
-            inputs=[], outputs=net.fidelity_1s(state, target_state))
+            inputs=[], outputs=_net.fidelity_1s(state, target_state))
 
         for idx, x in enumerate(xs):
             new_Js = Js[:]
             new_Js[index_to_vary] = x
-            net.J.set_value(new_Js)
+            _net.J.set_value(new_Js)
 
             fidelities[state_idx, idx] = compute_fidelity()
 
