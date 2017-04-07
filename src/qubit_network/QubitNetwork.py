@@ -650,7 +650,8 @@ class QubitNetwork:
         # guess we should show why this is correct?
         return tr_real
 
-    def fidelity(self, states, target_states, return_mean=True):
+    def fidelity(self, states, target_states, return_mean=True,
+                 return_var=False):
         """The cost function of the model.
 
         The states given in `states` are evolved through the network
@@ -689,7 +690,7 @@ class QubitNetwork:
             implement.
         return_mean : bool
             If True, returns the average values of the fidelities.
-            If False, returns the computed array of fidelities
+            If False, returns an array with all the fidelities.
 
         Returns
         -------
@@ -729,8 +730,8 @@ class QubitNetwork:
             return results
 
         # `compute_fidelities` is to be called by the immediately
-        # following `theano.scan`. It returns the fidelity between the
-        # result of evolving `states[i]` and `target_states[i]`.
+        # following `theano.scan`. It returns the fidelities between the
+        # result of evolving `states[i]` and `target_states[i]`, for each `i`.
         def compute_fidelities(i, matrix, target_states):
             # Here matrix[i] is the i-th training state after evolution
             # through exp(-1j * H)
@@ -808,6 +809,12 @@ class QubitNetwork:
 
         if return_mean:
             # return the mean of the fidelities
-            return T.mean(fidelities)
+
+            if return_var:
+                max_fid = T.max(fidelities)
+                min_fid = T.min(fidelities)
+                return T.mean(fidelities), max_fid - min_fid
+            else:
+                return T.mean(fidelities)
         else:
             return fidelities
