@@ -8,6 +8,7 @@ rather than just reading and analysing it.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import qutip
 import theano
 import theano.tensor as T
@@ -165,6 +166,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
     cost = _net.fidelity(x, y)
+    all_fidelities = _net.fidelity(x, y, return_mean=False)
 
     # compute the gradient of the cost
     g_J = T.grad(cost=cost, wrt=_net.J)
@@ -195,7 +197,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         # update plot that is shown when the training is ongoing.
         test_model = theano.function(
             inputs=[],
-            outputs=cost,
+            outputs=all_fidelities,
             updates=None,
             givens={
                 x: test_states,
@@ -209,7 +211,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
-    fids_history = []
+    fids_history = np.array([])
     fig, ax = plt.subplots(1, 1)
 
     # The try-except block allows to stop the computation with ctrl-C
@@ -226,15 +228,29 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                 minibatch_avg_cost = train_model(minibatch_index)
 
             # update fidelity history
-            fids_history.append(test_model())
+            new_fidelities = np.array(test_model())
+            new_fidelities = new_fidelities.reshape(
+                [new_fidelities.shape[0], 1])
+            if n_epoch == 0:
+                fids_history = new_fidelities
+            else:
+                fids_history = np.concatenate(
+                    (fids_history, new_fidelities), axis=1)
+            # print(new_variance)
             if print_fidelity:
                 print(fids_history[-1])
 
-            # update plot
-            ax.plot(fids_history, '-b')
-            plt.suptitle('learning rate: {}\nfidelity: {}'.format(
-                _learning_rate.get_value(), fids_history[-1]))
-            fig.canvas.draw()
+            if n_epoch > 0:
+                # update plot
+                sns.tsplot(fids_history, ci=100)
+                # ax.plot(fids_history, '-b')
+                plt.suptitle(('learning rate: {}\nfidelity: {}'
+                              'variance: {}').format(
+                    _learning_rate.get_value(),
+                    np.mean(fids_history[:, -1]),
+                    np.ptp(fids_history[:, -1]))
+                )
+                fig.canvas.draw()
 
             # update learning rate
             _learning_rate.set_value(
