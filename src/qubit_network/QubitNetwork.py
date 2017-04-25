@@ -64,6 +64,8 @@ class QubitNetwork:
                 self.ancillae_state = self.build_ancilla_state()
             else:
                 self.ancillae_state = ancillae_state
+        else:
+            self.ancillae_state = None
 
         # self.J is the set of parameters that we are going to train
         if J is None:
@@ -576,12 +578,18 @@ class QubitNetwork:
             psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
             psi_in.dims = [
                 [2] * self.num_system_qubits, [1] * self.num_system_qubits]
-            # embed it into the bigger system+ancilla space
-            Psi_in = qutip.tensor(psi_in, self.ancillae_state)
+            # embed it into the bigger system+ancilla space (if necessary)
+            if self.num_ancillae > 0:
+                Psi_in = qutip.tensor(psi_in, self.ancillae_state)
+            else:
+                Psi_in = psi_in
             # evolve input state
             Psi_out = gate * Psi_in
-            # trace out ancilla
-            dm_out = Psi_out.ptrace(range(self.num_system_qubits))
+            # trace out ancilla (if there is an ancilla to trace)
+            if self.num_ancillae > 0:
+                dm_out = Psi_out.ptrace(range(self.num_system_qubits))
+            else:
+                dm_out = qutip.ket2dm(Psi_out)
             # compute fidelity
             fidelity = (psi_in.dag() * target_gate.dag() *
                         dm_out * target_gate * psi_in)
