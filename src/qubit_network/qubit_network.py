@@ -245,7 +245,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                 sns.tsplot(fids_history, ci=100)
                 # ax.plot(fids_history, '-b')
                 plt.suptitle(('learning rate: {}\nfidelity: {}'
-                              'variance: {}').format(
+                              '\nmax - min: {}').format(
                     _learning_rate.get_value(),
                     np.mean(fids_history[:, -1]),
                     np.ptp(fids_history[:, -1]))
