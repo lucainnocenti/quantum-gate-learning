@@ -352,9 +352,10 @@ class QubitNetwork:
             data['full_unitary.real'] = current_gate.real.tolist()
             data['full_unitary.imag'] = current_gate.imag.tolist()
 
-            ancillae_state = self.ancillae_state.data.toarray()
-            data['ancillae_state.real'] = ancillae_state.real.tolist()
-            data['ancillae_state.imag'] = ancillae_state.imag.tolist()
+            if self.num_ancillae > 0:
+                ancillae_state = self.ancillae_state.data.toarray()
+                data['ancillae_state.real'] = ancillae_state.real.tolist()
+                data['ancillae_state.imag'] = ancillae_state.imag.tolist()
 
             # old saved nets did not have the target_gate attribute, so we have
             # to check for its existence to avoid errors later. Also, it is
