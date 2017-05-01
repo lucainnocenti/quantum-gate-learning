@@ -96,6 +96,36 @@ def resave_all_pickle_as_json(path=None):
                 print('Error while handling {}'.format(net_path))
                 raise
 
+
+def print_saved_nets_info(path=None):
+    """Create table summarizing all the `.pickle` net files in `path`"""
+    import glob
+    import qubit_network as qn
+    import pandas as pd
+
+    if path is None:
+        path = r'../data/nets/'
+
+    all_nets = glob.glob(path + '*.pickle')
+    data = []
+
+    for net_file in all_nets:
+        net = qn.load_network_from_file(net_file)
+
+        try:
+            data.append({})
+            data[-1]['name'] = os.path.splitext(os.path.basename(net_file))[0]
+            data[-1]['num_qubits'] = net.num_qubits
+            data[-1]['num_ancillae'] = net.num_ancillae
+            data[-1]['fid'] = net.test_fidelity_without_theano(n_samples=100)
+        except:
+            print('An error was raised during processing of {}'.format(
+                net_file))
+            continue
+
+    return pd.DataFrame(data)[['name', 'num_qubits', 'num_ancillae', 'fid']]
+
+
 # ----------------------------------------------------------------
 # Display gate matrices.
 # ----------------------------------------------------------------
