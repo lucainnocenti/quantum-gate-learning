@@ -85,6 +85,50 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      decay_rate=0.1,
                      precompiled_functions=None,
                      print_fidelity=False):
+    """Start the MBSGD training on the net.
+
+    Parameters
+    ----------
+    net : QubitNetwork object or str
+        The qubit network to be trained.
+
+        If a string is given, it is assumed to be the path of some
+        pre-saved net. When this is the case, the net is loaded from the
+        given path, and the training started from the interaction
+        parameters of the loaded net. At the end of the training, the
+        resulting net is also automatically saved in the same file.
+
+        If no value for `net` is given, a default 3 qubits + 1 ancilla
+        network with all interactions on is assumed.
+    learning_rate : float
+        Specifies the rate of change of the parameters at each iteration
+        of gradient descent. This rate is usually not fixed anyway, so
+        that the `learning_rate` parameter only gives the initial value
+        of the actual learning rate that will be used during training.
+    n_epochs : int
+        For every epoch, the number of gradient descent iterations is
+        given by the number of training states divided by `batch_size`.
+        At every such iteration the fidelity is computed taking the mean
+        fidelity over `batch_size` training states.
+        At the end of every epoch is also when a new point is added to
+        the dynamical plot recording the progression of the training,
+        and a new set of training states is generated.
+    batch_size : int
+        The number of training states to use at every iteration.
+    backup_file : str
+        If given, it is assumed to be a valid path, and the net will be
+        saved on this path *before* the training procedure takes place.
+        Equivalent to just save the net manually with `save_to_file`
+        before calling `sgd_optimization`.
+    saveafter_file : str
+        If given, it is assumed to be a valid path, where to save the
+        trained net at the end of the training. It doesn't do anything
+        is `net` is given as a string.
+        Note that the net is saved in this file also if the training is
+        manually aborted before its natural end.
+    training_dataset_size : int
+
+    """
 
     # -------- OPTIONS PARSING --------
 
@@ -94,9 +138,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     _net = None
     if net is None:
         _net = QubitNetwork(num_qubits=4,
-                            interactions=('all', ['xx', 'yy', 'zz']),
-                            self_interactions=('all', ['x', 'y', 'z']),
-                            system_qubits=[0, 1, 2])
+                            system_qubits=3,
+                            interactions='all')
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         _net = load_network_from_file(net)
@@ -148,7 +191,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         np.asarray(test_dataset[1], dtype=theano.config.floatX)
     )
 
-    # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBGD --------
+    # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBSGD --------
 
     print('Building the model...')
 
@@ -163,7 +206,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         name='learning_rate'
     )
 
-    # define the cost function, that is, the fidelity. This is the
+    # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
     cost = _net.fidelity(x, y)
     all_fidelities = _net.fidelity(x, y, return_mean=False)
