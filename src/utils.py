@@ -11,21 +11,31 @@ def complexrandn(dim1, dim2):
 
 
 def complex2bigreal(matrix):
-    """Takes an nxn complex matrix and returns a 2nx2n real matrix.
+    """Takes converts from complex to "big real" representation.
 
     To avoid the problem of theano and similar libraries not properly
     supporting the gradient of complex objects, we map every complex
     nxn matrix U to a bigger 2nx2n real matrix defined as
     [[Ur, -Ui], [Ui, Ur]], where Ur and Ui are the real and imaginary
     parts of U.
+
+    The input argument can be either a qutip object representing a ket,
+    or a qutip object representing an operator (a density matrix).
     """
+
     # if `matrix` is actually a qutip ket...
     if isinstance(matrix, qutip.Qobj) and matrix.shape[1] == 1:
         matrix = matrix.data.toarray()
         matrix = np.concatenate((np.real(matrix), np.imag(matrix)), axis=0)
         return matrix.reshape(matrix.shape[0])
+
+    # else, we assume the input to represent a density matrix. It can be
+    # both a 2d numpy array, or a 2d qutip object.
     else:
-        matrix = np.asarray(matrix)
+        if isinstance(matrix, qutip.Qobj):
+            matrix = matrix.data.toarray()
+        else:
+            matrix = np.asarray(matrix)
         row1 = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
         row2 = np.concatenate((np.imag(matrix), np.real(matrix)), axis=1)
         return np.concatenate((row1, row2), axis=0)
