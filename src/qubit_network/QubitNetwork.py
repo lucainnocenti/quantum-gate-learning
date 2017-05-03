@@ -12,6 +12,17 @@ import theano.tensor.nlinalg  # for trace()
 from utils import chars2pair, complex2bigreal, bigreal2complex, chop
 
 
+def _ket_to_dm(ket):
+    """Builds theano function to convert kets in dms in big real form"""
+    _ket = ket.reshape((ket.shape[0], 1))
+    ket_real = _ket[:_ket.shape[0] // 2]
+    ket_imag = _ket[_ket.shape[0] // 2:]
+
+    dm_real = ket_real * ket_real.T + ket_imag * ket_imag.T
+    dm_imag = ket_imag * ket_real.T - ket_real * ket_imag.T
+    return dm_real, dm_imag
+
+
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
                  interactions='all',
@@ -314,9 +325,8 @@ class QubitNetwork:
         # target is a unitary gate.
         if not isinstance(target_gate, qutip.Qobj):
             raise TypeError('`target_gate` should be a qutip object.')
-        if not target_gate.issuper:
-            target_states = [target_gate * psi for psi in training_states]
-        else:
+
+        if target_gate.issuper:
             target_states = []
             for psi in training_states:
                 # the open evolution is implemented vectorizing density
@@ -326,29 +336,22 @@ class QubitNetwork:
                 evolved_ket = target_gate * vec_dm_ket
                 evolved_ket = qutip.vector_to_operator(evolved_ket)
                 target_states.append(evolved_ket)
+        else:
+            target_states = [target_gate * psi for psi in training_states]
 
-        # now compute the tensor product between every element of
-        # `target_states` and the ancillae state, IF there are ancillae
-        # over which we have to trace over after the evolution
-        if self.num_ancillae > 0:
-            if target_gate.issuper:
-                tr_states_with_anc = []  # TRaining states with ANCillae
-                for ket in training_states:
-                    dm = qutip.tensor(
-                        qutip.ket2dm(ket), qutip.ket2dm(self.ancillae_state))
+        # Compute tensor product of TRAINING states with ancillae, when
+        # there are ancillae. In both cases, convert all training states
+        # in big real form
+        tr_states_with_anc = []  # TRaining states with ANCillae
+        for ket in training_states:
+            if self.num_ancillae > 0:
+                ket = qutip.tensor(ket, self.ancillae_state)
+            tr_states_with_anc.append(complex2bigreal(ket))
+        training_states = tr_states_with_anc
 
-                    dm = complex2bigreal(dm)
-                    tr_states_with_anc.append(dm)
-
-            else:  # else we assume the target gate to be a unitary matrix
-                tr_states_with_anc = []  # TRaining states with ANCillae
-                for ket in training_states:
-                    new_ket = qutip.tensor(ket, self.ancillae_state)
-                    tr_states_with_anc.append(complex2bigreal(new_ket))
-
-        return tr_states_with_anc
-        # convert all the computed states in big real form
-        training_states = [complex2bigreal(psi) for psi in training_states]
+        # convert all the target states in big real form.
+        # NOTE: the target states are kets if the target gate is unitary,
+        #       but they are density matrices for target open maps.
         target_states = [complex2bigreal(psi) for psi in target_states]
 
         return np.asarray(training_states), np.asarray(target_states)
@@ -395,6 +398,11 @@ class QubitNetwork:
             # messy to reload complex numbers from the json dumped data, so
             # we save real and imaginary parts separately.
             if self.target_gate:
+                if self.target_gate.issuper:
+                    data['target_gate.issuper'] = 1
+                else:
+                    data['target_gate.issuper'] = 0
+
                 target_gate = self.target_gate.data.toarray()
                 data['target_gate.real'] = target_gate.real.tolist()
                 data['target_gate.imag'] = target_gate.imag.tolist()
@@ -783,6 +791,7 @@ class QubitNetwork:
             Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
             dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
             dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
+            # dm_real, dm_imag = _ket_to_dm(matrix[i])
 
             dm_real_traced, _ = theano.scan(
                 fn=row_fn,
@@ -820,7 +829,7 @@ class QubitNetwork:
         # computed projecting the evolution of every element of
         # `states` over the corresponding element of `target_states`,
         # and taking the squared modulus of this number.
-        def fidelities_no_ptrace(i, states, target_states):
+        def compute_fidelities_no_ptrace(i, states, target_states):
             state = states[i]
             target_state = target_states[i]
             state_real = state[:state.shape[0] // 2]
@@ -839,7 +848,7 @@ class QubitNetwork:
         # ancillae over which to trace over.
         if self.num_ancillae == 0:
             fidelities, _ = theano.scan(
-                fn=fidelities_no_ptrace,
+                fn=compute_fidelities_no_ptrace,
                 sequences=T.arange(expH_times_state.shape[0]),
                 non_sequences=[expH_times_state, target_states]
             )
