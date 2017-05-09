@@ -209,7 +209,7 @@ def plot_fidelity_vs_J_live(net, xs, index_to_vary,
     if states is None or target_states is None:
         states, target_states = net.generate_training_data(size=n_states)
 
-    _net = copy.copy(net)
+    _net = copy.deepcopy(net)
     Js = _net.J.get_value()
 
     fig, ax = plt.subplots(1, 1)
@@ -266,7 +266,7 @@ def fidelity_vs_J(net):
     import theano
     import theano.tensor as T
 
-    _net = copy.copy(net)
+    _net = copy.deepcopy(net)
     xs = T.dvector('xs')
     states = T.dmatrix('states')
     target_states = T.dmatrix('target_states')
