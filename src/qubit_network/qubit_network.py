@@ -149,8 +149,12 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     # parse `target_gate` parameter
     if target_gate is None:
-        raise ValueError('`target_gate` must have a value.')
-    _net.target_gate = target_gate
+        if _net.target_gate is None:
+            raise ValueError('`target_gate` must have a value.')
+        else:
+            target_gate = _net.target_gate
+    else:
+        _net.target_gate = target_gate
 
     # parse `backup_file` parameter
     if isinstance(backup_file, str):
