@@ -1,5 +1,5 @@
-Test *test* **test** ***test***
+# 3-qubit gates reachable without ancillae:
 
-# Yep
-
-hello
+| gate | fidelity |
+| ---- | -------- |
+| Toffoli | 1 (up to numerical precision) |
