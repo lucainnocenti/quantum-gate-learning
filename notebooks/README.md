@@ -71,7 +71,7 @@ ccHadamard = (qutip.tensor(qutip.projection(2, 0, 0), qutip.qeye(2), qutip.qeye(
 [fredkin3qb+1a_2]: ../data/nets/fredkin_3q+1a_allpairs_onlyz_0.998fid.pickle
 [fredkin3qb+1a_3]: ../data/nets/fredkin_3q+1a_allpairs_onlyz_0.99999fid.pickle
 [fredkin3qb+1a_4]: ../data/nets/fredkin_3q+1a_allpairs_onlyz_0.999999fid.pickle
-[toffoli3qb+1a]: ../data/nets/toffoli_3q+1a_all_0.989.pickle
+[toffoli3qb+1a]: ../data/nets/toffoli_3q+1a_all_0.989fid.pickle
 
 
 ## 3 qubits + 1 ancilla networks, regular topology, all interactions
