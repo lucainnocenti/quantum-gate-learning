@@ -352,7 +352,7 @@ class QubitNetwork:
         # convert all the target states in big real form.
         # NOTE: the target states are kets if the target gate is unitary,
         #       but they are density matrices for target open maps.
-        target_states = [complex2bigreal(psi) for psi in target_states]
+        target_states = [complex2bigreal(st) for st in target_states]
 
         return np.asarray(training_states), np.asarray(target_states)
 
