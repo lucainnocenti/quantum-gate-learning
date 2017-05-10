@@ -1,5 +1,3 @@
-Let $2 + 2 \frac{4}{2}$
-=======
 ## 3-qubit gates reachable without ancillae
 
 All of the following nets have been successfully trained with the following code (appropriately changing the `target_gate` parameter):
