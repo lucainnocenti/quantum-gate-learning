@@ -23,12 +23,13 @@ where `gate` is generated using standard `qutip` functions (e.g. `qutip.toffoli(
 
 | Target gate | Obtained fidelity |
 | ---- | -------- |
-| [Toffoli (CC-X)][toff3qb] | 1 (up to numerical precision) |
+| [Toffoli (CC-X)][toff3qb_1] | 1. |
+| [Toffoli (CC-X)][toff3qb_2] | 0.9999 |
 | [Fredkin (C-SWAP)][fredkin3qb_1] | 0.99998 |
 | [Fredkin (C-SWAP)][fredkin3qb_2] | 0.99999 |
-| [CC-Z][ccz3qb] | 1 (up to numerical precision) |
-| [CC-S][ccs3qb] | 1 (up to numerical precision) |
-| [CC-Hadamard][ccH3qb] | 1 (up to numerical precision)
+| [CC-Z][ccz3qb] | 1. |
+| [CC-S][ccs3qb] | 1. |
+| [CC-Hadamard][ccH3qb] | 1. |
 
 The above target gates are generated with the following `qutip` functions:
 
@@ -47,7 +48,8 @@ ccHadamard = (qutip.tensor(qutip.projection(2, 0, 0), qutip.qeye(2), qutip.qeye(
               qutip.tensor(qutip.projection(2, 1, 1), qutip.qip.gates.controlled_gate(qutip.hadamard_transform())))
 ```
 
-[toff3qb]: ../data/nets/toffoli_3q_all_1fid.pickle
+[toff3qb_1]: ../data/nets/toffoli_3q_all_1fid.pickle
+[toff3qb_2]: ../data/nets/toffoli_3q_all_0.9999fid.pickle
 [fredkin3qb_1]: ../data/nets/fredkin_3q_all_0.9999fid.pickle
 [fredkin3qb_2]: ../data/nets/fredkin_3q_all_0.99999fid.pickle
 [ccz3qb]: ../data/nets/ccZ_3q_all_1fid.pickle
