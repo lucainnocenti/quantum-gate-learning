@@ -84,7 +84,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      target_gate=None,
                      decay_rate=0.1,
                      precompiled_functions=None,
-                     print_fidelity=False):
+                     print_fidelity=False,
+                     plot_errors=False):
     """Start the MBSGD training on the net.
 
     Parameters
@@ -127,7 +128,11 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         Note that the net is saved in this file also if the training is
         manually aborted before its natural end.
     training_dataset_size : int
+        blablalba
 
+    plot_errors : bool
+        If True, at every epoch the difference between max and min
+        fidelities is reported.
     """
 
     # -------- OPTIONS PARSING --------
@@ -213,7 +218,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
     cost = _net.fidelity(x, y)
-    all_fidelities = _net.fidelity(x, y, return_mean=False)
+    all_fidelities = _net.fidelity(x, y, return_mean=True)
 
     # compute the gradient of the cost
     g_J = T.grad(cost=cost, wrt=_net.J)
@@ -259,6 +264,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
     fids_history = np.array([])
+    fids_history = []
     fig, ax = plt.subplots(1, 1)
 
     # The try-except block allows to stop the computation with ctrl-C
@@ -275,29 +281,35 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                 minibatch_avg_cost = train_model(minibatch_index)
 
             # update fidelity history
-            new_fidelities = np.array(test_model())
-            new_fidelities = new_fidelities.reshape(
-                [new_fidelities.shape[0], 1])
-            if n_epoch == 0:
-                fids_history = new_fidelities
-            else:
-                fids_history = np.concatenate(
-                    (fids_history, new_fidelities), axis=1)
+            fids_history.append(test_model())
+            # new_fidelities = np.array(test_model())
+            # new_fidelities = new_fidelities.reshape(
+            #     [new_fidelities.shape[0], 1])
+            # if n_epoch == 0:
+            #     fids_history = new_fidelities
+            # else:
+            #     fids_history = np.concatenate(
+            #         (fids_history, new_fidelities), axis=1)
             # print(new_variance)
             if print_fidelity:
                 print(fids_history[-1])
 
-            if n_epoch > 0:
-                # update plot
-                sns.tsplot(fids_history, ci=100)
-                # ax.plot(fids_history, '-b')
-                plt.suptitle(('learning rate: {}\nfidelity: {}'
-                              '\nmax - min: {}').format(
-                    _learning_rate.get_value(),
-                    np.mean(fids_history[:, -1]),
-                    np.ptp(fids_history[:, -1]))
-                )
-                fig.canvas.draw()
+            # if n_epoch > 0:
+            #     # update plot
+            #     sns.tsplot(fids_history, ci=100)
+            #     # ax.plot(fids_history, '-b')
+            #     plt.suptitle(('learning rate: {}\nfidelity: {}'
+            #                   '\nmax - min: {}').format(
+            #         _learning_rate.get_value(),
+            #         np.mean(fids_history[:, -1]),
+            #         np.ptp(fids_history[:, -1]))
+            #     )
+            #     fig.canvas.draw()
+
+            ax.plot(fids_history, '-b')
+            plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+                _learning_rate.get_value(), fids_history[-1]))
+            fig.canvas.draw()
 
             # update learning rate
             _learning_rate.set_value(
