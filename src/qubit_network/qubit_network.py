@@ -76,6 +76,48 @@ def transfer_J_values(source_net, target_net):
     target_net.J.set_value(target_J)
 
 
+def _gradient_updates_momentum(params, grad, learning_rate, momentum):
+    '''
+    Compute updates for gradient descent with momentum
+
+    :parameters:
+        - cost : theano.tensor.var.TensorVariable
+            Theano cost function to minimize
+        - params : list of theano.tensor.var.TensorVariable
+            Parameters to compute gradient against
+        - learning_rate : float
+            Gradient descent learning rate
+        - momentum : float
+            Momentum parameter, should be at least 0 (standard gradient
+            descent) and less than 1
+
+    :returns:
+        updates : list
+            List of updates, one for each parameter
+    '''
+    # Make sure momentum is a sane value
+    assert momentum < 1 and momentum >= 0
+    # List of update steps for each parameter
+    updates = []
+    if not isinstance(params, list):
+        params = [params]
+    # Just gradient descent on cost
+    for param in params:
+        # For each parameter, we'll create a previous_step shared variable.
+        # This variable will keep track of the parameter's update step
+        # across iterations.
+        # We initialize it to 0
+        previous_step = theano.shared(param.get_value() * 0.,
+                                      broadcastable=param.broadcastable)
+        step = momentum * previous_step + learning_rate * grad
+        # Add an update to store the previous step value
+        updates.append((previous_step, step))
+        # Add an update to apply the gradient descent step to the
+        # parameter itself
+        updates.append((param, param + step))
+    return updates
+
+
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100,
                      backup_file=None,
@@ -87,7 +129,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      precompiled_functions=None,
                      print_fidelity=False,
                      # plot_errors=False,
-                     truncate_fidelity_history=60):
+                     truncate_fidelity_history=200,
+                     SGD_method='momentum'):
     """Start the MBSGD training on the net.
 
     Parameters
@@ -227,7 +270,11 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
-    updates = [(_net.J, _net.J + _learning_rate * g_J)]
+    if SGD_method == 'momentum':
+        updates = _gradient_updates_momentum(_net.J, g_J, _learning_rate, 0.5)
+    else:
+        raise ValueError('SGD_method has an invalid value.')
+    # updates = [(_net.J, _net.J + _learning_rate * g_J)]
 
     # Theoretically it should be possible to reuse already compiled
     # computational graph, but I didn't really test this functionality yet.
