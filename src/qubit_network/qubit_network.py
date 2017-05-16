@@ -13,6 +13,7 @@ import qutip
 import theano
 import theano.tensor as T
 import pickle
+import collections
 
 # package imports
 from .QubitNetwork import QubitNetwork
@@ -85,7 +86,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      decay_rate=0.1,
                      precompiled_functions=None,
                      print_fidelity=False,
-                     plot_errors=False):
+                     # plot_errors=False,
+                     truncate_fidelity_history=60):
     """Start the MBSGD training on the net.
 
     Parameters
@@ -130,7 +132,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     training_dataset_size : int
         blablalba
 
-    plot_errors : bool
+    plot_errors : bool (YET TO IMPLEMENT)
         If True, at every epoch the difference between max and min
         fidelities is reported.
     """
@@ -218,7 +220,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
     cost = _net.fidelity(x, y)
-    all_fidelities = _net.fidelity(x, y, return_mean=True)
+    # all_fidelities = _net.fidelity(x, y, return_mean=True)
 
     # compute the gradient of the cost
     g_J = T.grad(cost=cost, wrt=_net.J)
@@ -249,7 +251,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         # update plot that is shown when the training is ongoing.
         test_model = theano.function(
             inputs=[],
-            outputs=all_fidelities,
+            outputs=cost,
             updates=None,
             givens={
                 x: test_states,
@@ -263,8 +265,12 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
-    fids_history = np.array([])
-    fids_history = []
+    # fids_history = np.array([])
+    if truncate_fidelity_history is None:
+        fids_history = []
+    else:
+        fids_history = collections.deque(maxlen=truncate_fidelity_history)
+
     fig, ax = plt.subplots(1, 1)
 
     # The try-except block allows to stop the computation with ctrl-C
@@ -282,6 +288,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
             # update fidelity history
             fids_history.append(test_model())
+
             # new_fidelities = np.array(test_model())
             # new_fidelities = new_fidelities.reshape(
             #     [new_fidelities.shape[0], 1])
@@ -305,8 +312,18 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             #         np.ptp(fids_history[:, -1]))
             #     )
             #     fig.canvas.draw()
+            if truncate_fidelity_history is None:
+                ax.plot(fids_history, '-b')
+            else:
+                if len(fids_history) == truncate_fidelity_history:
+                    x_coords = np.arange(
+                        n_epoch - truncate_fidelity_history + 1,
+                        n_epoch + 1)
+                else:
+                    x_coords = np.arange(len(fids_history))
 
-            ax.plot(fids_history, '-b')
+                ax.clear()
+                ax.plot(x_coords, fids_history, '-b')
             plt.suptitle('learning rate: {}\nfidelity: {}'.format(
                 _learning_rate.get_value(), fids_history[-1]))
             fig.canvas.draw()
