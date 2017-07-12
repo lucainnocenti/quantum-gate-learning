@@ -78,7 +78,9 @@ class QubitNetwork:
         else:
             self.ancillae_state = None
 
-        # self.J is the set of parameters that we are going to train
+        # If no value of `J` has been given, then `self.J` is initialised
+        # with random values. The length of the array is chosen using
+        # the value of `self.num_interactions`, or `net_topology` if given.
         if J is None:
             if net_topology is None:
                 self.J = theano.shared(
@@ -93,14 +95,21 @@ class QubitNetwork:
                     name='J',
                     borrow=True
                 )
+        # If a value for `J` has been given during the initialisation of
+        # the `QubitNetwork` instance, then that value is directly stored
+        # into `self.J`. If also  a `net_topology` has been given, a
+        # consistency check if performed.
         else:
-            # if a `net_topology` has been given, check consistency
+            # If a `net_topology` has been given, check consistency:
+            # the number of elements given for `J` must be equal to the
+            # number of distinct symbols specified in `net_topology`.
             if net_topology is not None:
                 num_symbols = len(set(s for s in net_topology.values()))
                 if np.asarray(J).shape[0] != num_symbols:
                     raise ValueError('The number of specified parameters is '
                                      'not consistent with the value of `net'
                                      '_topology`.')
+
             self.J = theano.shared(
                 value=np.asarray(J),
                 name='J',
@@ -272,7 +281,7 @@ class QubitNetwork:
     def build_ancilla_state(self):
         """Returns an initial ancilla state, as a qutip.Qobj object.
 
-        The generated state has every ancillary qubit in the up position.
+        The generated state has every ancillary qubit in the up state.
         """
         state = qutip.tensor([qutip.basis(2, 0)
                               for _ in range(self.num_ancillae)])
@@ -785,7 +794,7 @@ class QubitNetwork:
         # result of evolving `states[i]` and `target_states[i]`, for each `i`.
         def compute_fidelities(i, matrix, target_states):
             # Here matrix[i] is the i-th training state after evolution
-            # through exp(-1j * H)
+            # through exp(-1j * H), in regular complex form
             Uxpsi = matrix[i].reshape((matrix[i].shape[0], 1))
             Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
             Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
