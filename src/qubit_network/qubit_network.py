@@ -13,6 +13,7 @@ import qutip
 import theano
 import theano.tensor as T
 import pickle
+import collections
 
 # package imports
 from .QubitNetwork import QubitNetwork
@@ -75,6 +76,48 @@ def transfer_J_values(source_net, target_net):
     target_net.J.set_value(target_J)
 
 
+def _gradient_updates_momentum(params, grad, learning_rate, momentum):
+    '''
+    Compute updates for gradient descent with momentum
+
+    :parameters:
+        - cost : theano.tensor.var.TensorVariable
+            Theano cost function to minimize
+        - params : list of theano.tensor.var.TensorVariable
+            Parameters to compute gradient against
+        - learning_rate : float
+            Gradient descent learning rate
+        - momentum : float
+            Momentum parameter, should be at least 0 (standard gradient
+            descent) and less than 1
+
+    :returns:
+        updates : list
+            List of updates, one for each parameter
+    '''
+    # Make sure momentum is a sane value
+    assert momentum < 1 and momentum >= 0
+    # List of update steps for each parameter
+    updates = []
+    if not isinstance(params, list):
+        params = [params]
+    # Just gradient descent on cost
+    for param in params:
+        # For each parameter, we'll create a previous_step shared variable.
+        # This variable will keep track of the parameter's update step
+        # across iterations.
+        # We initialize it to 0
+        previous_step = theano.shared(param.get_value() * 0.,
+                                      broadcastable=param.broadcastable)
+        step = momentum * previous_step + learning_rate * grad
+        # Add an update to store the previous step value
+        updates.append((previous_step, step))
+        # Add an update to apply the gradient descent step to the
+        # parameter itself
+        updates.append((param, param + step))
+    return updates
+
+
 def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      batch_size=100,
                      backup_file=None,
@@ -84,7 +127,10 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                      target_gate=None,
                      decay_rate=0.1,
                      precompiled_functions=None,
-                     print_fidelity=False):
+                     print_fidelity=False,
+                     # plot_errors=False,
+                     truncate_fidelity_history=200,
+                     SGD_method='momentum'):
     """Start the MBSGD training on the net.
 
     Parameters
@@ -127,7 +173,11 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         Note that the net is saved in this file also if the training is
         manually aborted before its natural end.
     training_dataset_size : int
+        blablalba
 
+    plot_errors : bool (YET TO IMPLEMENT)
+        If True, at every epoch the difference between max and min
+        fidelities is reported.
     """
 
     # -------- OPTIONS PARSING --------
@@ -213,14 +263,18 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
     cost = _net.fidelity(x, y)
-    all_fidelities = _net.fidelity(x, y, return_mean=False)
+    # all_fidelities = _net.fidelity(x, y, return_mean=True)
 
     # compute the gradient of the cost
     g_J = T.grad(cost=cost, wrt=_net.J)
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
-    updates = [(_net.J, _net.J + _learning_rate * g_J)]
+    if SGD_method == 'momentum':
+        updates = _gradient_updates_momentum(_net.J, g_J, _learning_rate, 0.5)
+    else:
+        raise ValueError('SGD_method has an invalid value.')
+    # updates = [(_net.J, _net.J + _learning_rate * g_J)]
 
     # Theoretically it should be possible to reuse already compiled
     # computational graph, but I didn't really test this functionality yet.
@@ -244,7 +298,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
         # update plot that is shown when the training is ongoing.
         test_model = theano.function(
             inputs=[],
-            outputs=all_fidelities,
+            outputs=cost,
             updates=None,
             givens={
                 x: test_states,
@@ -258,7 +312,12 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     print('Let\'s roll!')
     n_train_batches = states.get_value().shape[0] // batch_size
-    fids_history = np.array([])
+    # fids_history = np.array([])
+    if truncate_fidelity_history is None:
+        fids_history = []
+    else:
+        fids_history = collections.deque(maxlen=truncate_fidelity_history)
+
     fig, ax = plt.subplots(1, 1)
 
     # The try-except block allows to stop the computation with ctrl-C
@@ -275,29 +334,46 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
                 minibatch_avg_cost = train_model(minibatch_index)
 
             # update fidelity history
-            new_fidelities = np.array(test_model())
-            new_fidelities = new_fidelities.reshape(
-                [new_fidelities.shape[0], 1])
-            if n_epoch == 0:
-                fids_history = new_fidelities
-            else:
-                fids_history = np.concatenate(
-                    (fids_history, new_fidelities), axis=1)
+            fids_history.append(test_model())
+
+            # new_fidelities = np.array(test_model())
+            # new_fidelities = new_fidelities.reshape(
+            #     [new_fidelities.shape[0], 1])
+            # if n_epoch == 0:
+            #     fids_history = new_fidelities
+            # else:
+            #     fids_history = np.concatenate(
+            #         (fids_history, new_fidelities), axis=1)
             # print(new_variance)
             if print_fidelity:
                 print(fids_history[-1])
 
-            if n_epoch > 0:
-                # update plot
-                sns.tsplot(fids_history, ci=100)
-                # ax.plot(fids_history, '-b')
-                plt.suptitle(('learning rate: {}\nfidelity: {}'
-                              '\nmax - min: {}').format(
-                    _learning_rate.get_value(),
-                    np.mean(fids_history[:, -1]),
-                    np.ptp(fids_history[:, -1]))
-                )
-                fig.canvas.draw()
+            # if n_epoch > 0:
+            #     # update plot
+            #     sns.tsplot(fids_history, ci=100)
+            #     # ax.plot(fids_history, '-b')
+            #     plt.suptitle(('learning rate: {}\nfidelity: {}'
+            #                   '\nmax - min: {}').format(
+            #         _learning_rate.get_value(),
+            #         np.mean(fids_history[:, -1]),
+            #         np.ptp(fids_history[:, -1]))
+            #     )
+            #     fig.canvas.draw()
+            if truncate_fidelity_history is None:
+                ax.plot(fids_history, '-b')
+            else:
+                if len(fids_history) == truncate_fidelity_history:
+                    x_coords = np.arange(
+                        n_epoch - truncate_fidelity_history + 1,
+                        n_epoch + 1)
+                else:
+                    x_coords = np.arange(len(fids_history))
+
+                ax.clear()
+                ax.plot(x_coords, fids_history, '-b')
+            plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+                _learning_rate.get_value(), fids_history[-1]))
+            fig.canvas.draw()
 
             # update learning rate
             _learning_rate.set_value(
