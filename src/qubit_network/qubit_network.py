@@ -54,11 +54,11 @@ def load_network_from_file(infile):
 
 def transfer_J_values(source_net, target_net):
     """
-    Transfer the values of the intarctions in the source to the target.
+    Transfer the values of the interactions from source to target net.
 
     All the interactions corresponding to the `J` values of `source_net`
-    are checked, and for those interactions that are also active in
-    `target_net` the corresponding `J` value is copied into `target_net`
+    are checked, and those interactions that are also active in
+    `target_net` are copied into `target_net`.
     """
     source_J = source_net.J.get_value()
     target_J = target_net.J.get_value()
@@ -104,9 +104,8 @@ def _gradient_updates_momentum(params, grad, learning_rate, momentum):
     # Just gradient descent on cost
     for param in params:
         # For each parameter, we'll create a previous_step shared variable.
-        # This variable will keep track of the parameter's update step
-        # across iterations.
-        # We initialize it to 0
+        # This variable keeps track of the parameter's update step
+        # across iterations. We initialize it to 0
         previous_step = theano.shared(param.get_value() * 0.,
                                       broadcastable=param.broadcastable)
         step = momentum * previous_step + learning_rate * grad
@@ -169,9 +168,12 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     saveafter_file : str
         If given, it is assumed to be a valid path, where to save the
         trained net at the end of the training. It doesn't do anything
-        is `net` is given as a string.
-        Note that the net is saved in this file also if the training is
-        manually aborted before its natural end.
+        if `net` is given as a string, as in that case the default
+        behaviour is to save the net at the end of the training in the
+        same file from which it was loaded.
+
+        Note that the net is saved in `saveafter_file` even if the
+        training is manually aborted before its natural end.
     training_dataset_size : int
         blablalba
 
