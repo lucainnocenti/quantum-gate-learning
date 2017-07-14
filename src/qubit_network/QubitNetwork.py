@@ -40,6 +40,77 @@ def _split_bigreal_ket(ket):
     return ket_real, ket_imag
 
 
+# `compute_fidelities` is to be called by the immediately following
+# `theano.scan`. It returns the fidelities between the result of
+# evolving `states[i]` and `target_states[i]`, for each `i`.
+def _compute_fidelities(i, matrix, target_states, num_ancillae):
+    # Here matrix[i] is the i-th training state after evolution
+    # through exp(-1j * H), in regular complex ket form
+    # - `matrix[i]` has length `2 * (2 ** num_qubits)`, with
+    #   `num_qubits` the *total* number of qubits (not just the
+    #    system ones).
+    # - `dm_real` and `dm_imag` will be square matrices of length
+    #   `2 ** num_qubits`.
+    dm_real, dm_imag = _ket_to_dm(matrix[i])
+    # `dm_real_traced` and `dm_imag_traced` are square matrices
+    # of length `2 ** num_system_qubits`.
+    dm_real_traced, _ = theano.scan(
+        fn=_compute_fidelities_row_fn,
+        sequences=T.arange(dm_real.shape[0] // 2 ** num_ancillae),
+        non_sequences=[dm_real, num_ancillae]
+    )
+    dm_imag_traced, _ = theano.scan(
+        fn=_compute_fidelities_row_fn,
+        sequences=T.arange(dm_imag.shape[0] // 2 ** num_ancillae),
+        non_sequences=[dm_imag, num_ancillae]
+    )
+
+    #  ---- Old method to compute trace of product of dms: ----
+    # target_dm_real, target_dm_imag = _ket_to_dm(target_states[i])
+
+    # prod_real = (T.dot(dm_real_traced, target_dm_real) -
+    #              T.dot(dm_imag_traced, target_dm_imag))
+    # tr_real = T.nlinalg.trace(prod_real)
+
+    # # we need only take the trace of the real part of the product,
+    # # as if \rho and \rho' are two Hermitian matrices, then
+    # # Tr(\rho_R \rho'_I) = Tr(\rho_I \rho'_R) = 0.
+    # return tr_real
+
+    # ---- New method: ----
+    target_real, target_imag = _split_bigreal_ket(target_states[i])
+
+    # `Psi` and `PsiTilde` have length 2 * (2 ** numSystemQubits)
+    Psi = target_states[i][:, None]
+    PsiTilde = T.concatenate((-target_imag, target_real))[:, None]
+    # `big_dm` is a square matrix with same length
+    big_dm = T.concatenate((
+        T.concatenate((dm_imag_traced, dm_real_traced), axis=1),
+        T.concatenate((-dm_real_traced, dm_imag_traced), axis=1)
+    ), axis=0)
+    out_fidelity = Psi.T.dot(big_dm).dot(PsiTilde)
+    return out_fidelity
+
+
+# `col_fn` and `row_fn` are used inside `compute_fidelities` to
+# compute the partial traces
+def _compute_fidelities_col_fn(col_idx, row_idx, matrix, num_ancillae):
+    subm_dim = 2 ** num_ancillae
+    return T.nlinalg.trace(
+        matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
+               col_idx * subm_dim:(col_idx + 1) * subm_dim]
+    )
+
+
+def _compute_fidelities_row_fn(row_idx, matrix, num_ancillae):
+    results, _ = theano.scan(
+        fn=_compute_fidelities_col_fn,
+        sequences=T.arange(matrix.shape[1] // 2 ** num_ancillae),
+        non_sequences=[row_idx, matrix, num_ancillae]
+    )
+    return results
+
+
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
                  interactions='all',
@@ -132,6 +203,7 @@ class QubitNetwork:
                 name='J',
                 borrow=True
             )
+
 
     def parse_interactions(self, interactions):
         """Sets the value of `self.interactions`. Returns None.
@@ -795,74 +867,6 @@ class QubitNetwork:
         # parameters.
         expH_times_state = T.tensordot(expH, states, axes=([1], [1])).T
 
-        # `col_fn` and `row_fn` are used inside `compute_fidelities` to
-        # compute the partial traces
-        def col_fn(col_idx, row_idx, matrix):
-            subm_dim = 2 ** self.num_ancillae
-            return T.nlinalg.trace(
-                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
-                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
-
-        def row_fn(row_idx, matrix):
-            results, _ = theano.scan(
-                fn=col_fn,
-                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillae),
-                non_sequences=[row_idx, matrix]
-            )
-            return results
-
-        # `compute_fidelities` is to be called by the immediately
-        # following `theano.scan`. It returns the fidelities between the
-        # result of evolving `states[i]` and `target_states[i]`, for each `i`.
-        def compute_fidelities(i, matrix, target_states):
-            # Here matrix[i] is the i-th training state after evolution
-            # through exp(-1j * H), in regular complex ket form
-            # - `matrix[i]` has length `2 * (2 ** num_qubits)`, with
-            #   `num_qubits` the *total* number of qubits (not just the
-            #    system ones).
-            # - `dm_real` and `dm_imag` will be square matrices of length
-            #   `2 ** num_qubits`.
-            dm_real, dm_imag = _ket_to_dm(matrix[i])
-            # `dm_real_traced` and `dm_imag_traced` are square matrices
-            # of length `2 ** num_system_qubits`.
-            dm_real_traced, _ = theano.scan(
-                fn=row_fn,
-                sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillae),
-                non_sequences=[dm_real]
-            )
-            dm_imag_traced, _ = theano.scan(
-                fn=row_fn,
-                sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillae),
-                non_sequences=[dm_imag]
-            )
-
-            #  ---- Old method to compute trace of product of dms: ----
-            # target_dm_real, target_dm_imag = _ket_to_dm(target_states[i])
-
-            # prod_real = (T.dot(dm_real_traced, target_dm_real) -
-            #              T.dot(dm_imag_traced, target_dm_imag))
-            # tr_real = T.nlinalg.trace(prod_real)
-
-            # # we need only take the trace of the real part of the product,
-            # # as if \rho and \rho' are two Hermitian matrices, then
-            # # Tr(\rho_R \rho'_I) = Tr(\rho_I \rho'_R) = 0.
-            # return tr_real
-
-            # ---- New method: ----
-            target_real, target_imag = _split_bigreal_ket(target_states[i])
-
-            # `Psi` and `PsiTilde` have length 2 * (2 ** numSystemQubits)
-            Psi = target_states[i][:, None]
-            PsiTilde = T.concatenate((-target_imag, target_real))[:, None]
-            # `big_dm` is a square matrix with same length
-            big_dm = T.concatenate((
-                T.concatenate((dm_imag_traced, dm_real_traced), axis=1),
-                T.concatenate((-dm_real_traced, dm_imag_traced), axis=1)
-            ), axis=0)
-            out_fidelity = Psi.T.dot(big_dm).dot(PsiTilde)
-            return out_fidelity
-
-
         # If no ancilla is present in the network, there is no need
         # to partial trace anything, so that the fidelity can be simply
         # computed projecting the evolution of every element of
@@ -893,9 +897,10 @@ class QubitNetwork:
             )
         else:
             fidelities, _ = theano.scan(
-                fn=compute_fidelities,
+                fn=_compute_fidelities,
                 sequences=T.arange(expH_times_state.shape[0]),
-                non_sequences=[expH_times_state, target_states]
+                non_sequences=[expH_times_state, target_states,
+                               self.num_ancillae]
             )
 
         # the default behaviour is to return the mean computed fidelity,
