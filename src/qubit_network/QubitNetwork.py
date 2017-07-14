@@ -111,6 +111,23 @@ def _compute_fidelities_row_fn(row_idx, matrix, num_ancillae):
     return results
 
 
+def _compute_fidelities_no_ptrace(i, states, target_states):
+    state = states[i]
+    target_state = target_states[i]
+
+    state_real = state[:state.shape[0] // 2]
+    state_imag = state[state.shape[0] // 2:]
+    target_state_real = target_state[:target_state.shape[0] // 2]
+    target_state_imag = target_state[target_state.shape[0] // 2:]
+
+    fidelity_real = (T.dot(state_real, target_state_real) +
+                     T.dot(state_imag, target_state_imag))
+    fidelity_imag = (T.dot(state_real, target_state_imag) -
+                     T.dot(state_imag, target_state_real))
+    fidelity = fidelity_real ** 2 + fidelity_imag ** 2
+    return fidelity
+
+
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
                  interactions='all',
@@ -872,26 +889,9 @@ class QubitNetwork:
         # computed projecting the evolution of every element of
         # `states` over the corresponding element of `target_states`,
         # and taking the squared modulus of this number.
-        def compute_fidelities_no_ptrace(i, states, target_states):
-            state = states[i]
-            target_state = target_states[i]
-            state_real = state[:state.shape[0] // 2]
-            state_imag = state[state.shape[0] // 2:]
-            target_state_real = target_state[:target_state.shape[0] // 2]
-            target_state_imag = target_state[target_state.shape[0] // 2:]
-
-            fidelity_real = (T.dot(state_real, target_state_real) +
-                             T.dot(state_imag, target_state_imag))
-            fidelity_imag = (T.dot(state_real, target_state_imag) -
-                             T.dot(state_imag, target_state_real))
-            fidelity = fidelity_real ** 2 + fidelity_imag ** 2
-            return fidelity
-
-        # the function also supports the case in which there are no
-        # ancillae over which to trace over.
         if self.num_ancillae == 0:
             fidelities, _ = theano.scan(
-                fn=compute_fidelities_no_ptrace,
+                fn=_compute_fidelities_no_ptrace,
                 sequences=T.arange(expH_times_state.shape[0]),
                 non_sequences=[expH_times_state, target_states]
             )
