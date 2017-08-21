@@ -1,4 +1,4 @@
-## 3-qubit gates reachable without ancillae
+## 3-qubit gates without ancillae, all interactions
 
 All of the following nets have been successfully trained with the following code (appropriately changing the `target_gate` parameter):
 
@@ -56,6 +56,8 @@ ccHadamard = (qutip.tensor(qutip.projection(2, 0, 0), qutip.qeye(2), qutip.qeye(
 [ccS3qb]: ../data/nets/ccS_3q_all_1fid.pickle
 [ccH3qb]: ../data/nets/ccH_3q_all_1fid.pickle
 
+## 3-qubit gates without ancillae, restricted sets of interactions
+We here investigate the training of 3-qubit networks to implement unitary evolutions, without ancillary qubits, without however allowing for all possible interaction terms in the network.
 
 ## 3 qubits + 1 ancilla networks, regular topology, only z selfinteractions
 

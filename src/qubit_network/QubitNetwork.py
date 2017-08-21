@@ -92,9 +92,15 @@ def _compute_fidelities(i, matrix, target_states, num_ancillae):
     return out_fidelity
 
 
-# `col_fn` and `row_fn` are used inside `compute_fidelities` to
-# compute the partial traces
 def _compute_fidelities_col_fn(col_idx, row_idx, matrix, num_ancillae):
+    """
+    `_compute_fidelities_col_fn` and `(...)row_fn` are the functions that
+    handle the computation of the partial traces. The latter is run on
+    each block of rows of the matrix to partial trace, with each block
+     containing `2 ** num_ancillae` rows.
+    For each block of rows, the former scans through the corresponding
+    blocks of columns, taking the trace of each resulting submatrix.
+    """
     subm_dim = 2 ** num_ancillae
     return T.nlinalg.trace(
         matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
@@ -103,6 +109,7 @@ def _compute_fidelities_col_fn(col_idx, row_idx, matrix, num_ancillae):
 
 
 def _compute_fidelities_row_fn(row_idx, matrix, num_ancillae):
+    """See `_compute_fidelities_col_fn`."""
     results, _ = theano.scan(
         fn=_compute_fidelities_col_fn,
         sequences=T.arange(matrix.shape[1] // 2 ** num_ancillae),
@@ -171,7 +178,9 @@ class QubitNetwork:
 
         # `parse_interactions` fills the `self.interactions`,
         # `self.num_interactions` and `self.num_self_interactions`
-        # variables
+        # variables. Note that if `net_topology` is not None, then the
+        # the value of `interactions` is not actually used to fill
+        # `self.interactions`.
         self.parse_interactions(interactions)
 
         # Build the initial state of the ancillae, if there are any
