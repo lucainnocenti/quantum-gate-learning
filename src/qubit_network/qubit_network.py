@@ -6,14 +6,18 @@ methods in this module write or modify data saved in `QubitNetwork` objects,
 rather than just reading and analysing it.
 """
 
+import pickle
+import collections
+
 import numpy as np
+import pandas as pd
+
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 import qutip
 import theano
 import theano.tensor as T
-import pickle
-import collections
 
 # package imports
 from .QubitNetwork import QubitNetwork
@@ -37,8 +41,8 @@ def load_network_from_file(infile):
 
     if 'ancillae_state' not in data.keys():
         num_ancillae = data['num_qubits'] - data['num_system_qubits']
-        data['ancillae_state'] = qutip.tensor([
-            qutip.basis(2, 0) for _ in range(num_ancillae)])
+        data['ancillae_state'] = qutip.tensor(
+            [qutip.basis(2, 0) for _ in range(num_ancillae)])
 
     net = QubitNetwork(
         num_qubits=data['num_qubits'],
@@ -47,8 +51,7 @@ def load_network_from_file(infile):
         ancillae_state=data['ancillae_state'],
         target_gate=data['target_gate'],
         net_topology=data['net_topology'],
-        J=data['J']
-    )
+        J=data['J'])
     return net
 
 
@@ -74,44 +77,6 @@ def transfer_J_values(source_net, target_net):
             target_J[target_idx] = J
 
     target_net.J.set_value(target_J)
-
-
-def net_parameters_to_dataframe(net, stringify_index=False):
-    """
-    Take parameters from a QubitNetwork object and put it in DataFrame.
-    
-    Parameters
-    ----------
-    stringify_index : bool
-        If True, instead of a MultiIndex the output DataFrame will have
-        a single index of strings, built applying `df.index.map(str)` to
-        the original index structure.
-    
-    Returns
-    -------
-    A `pandas.DataFrame` with the interaction parameters ordered by
-    qubits on which they act and type (interaction direction).
-    """
-    parameters = net.get_interactions_with_Js()
-    qubits = []
-    directions = []
-    values = []
-    for key, value in parameters.items():
-        try:
-            qubits.append(tuple(key[0]))
-        except TypeError:
-            qubits.append((key[0],))
-        directions.append(key[1])
-        values.append(value)
-
-    df = pd.DataFrame({
-        'qubits': qubits,
-        'directions': directions,
-        'values': values
-    }).set_index(['qubits', 'directions']).sort_index()
-    if stringify_index:
-        df.index = df.index.map(str)
-    return df
 
 
 def _gradient_updates_momentum(params, grad, learning_rate, momentum):
@@ -144,8 +109,8 @@ def _gradient_updates_momentum(params, grad, learning_rate, momentum):
         # For each parameter, we'll create a previous_step shared variable.
         # This variable keeps track of the parameter's update step
         # across iterations. We initialize it to 0
-        previous_step = theano.shared(param.get_value() * 0.,
-                                      broadcastable=param.broadcastable)
+        previous_step = theano.shared(
+            param.get_value() * 0., broadcastable=param.broadcastable)
         step = momentum * previous_step + learning_rate * grad
         # Add an update to store the previous step value
         updates.append((previous_step, step))
@@ -155,19 +120,22 @@ def _gradient_updates_momentum(params, grad, learning_rate, momentum):
     return updates
 
 
-def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
-                     batch_size=100,
-                     backup_file=None,
-                     saveafter_file=None,
-                     training_dataset_size=1000,
-                     test_dataset_size=1000,
-                     target_gate=None,
-                     decay_rate=0.1,
-                     precompiled_functions=None,
-                     print_fidelity=False,
-                     # plot_errors=False,
-                     truncate_fidelity_history=200,
-                     SGD_method='momentum'):
+def sgd_optimization(
+        net=None,
+        learning_rate=0.13,
+        n_epochs=100,
+        batch_size=100,
+        backup_file=None,
+        saveafter_file=None,
+        training_dataset_size=1000,
+        test_dataset_size=1000,
+        target_gate=None,
+        decay_rate=0.1,
+        precompiled_functions=None,
+        print_fidelity=False,
+        # plot_errors=False,
+        truncate_fidelity_history=200,
+        SGD_method='momentum'):
     """Start the MBSGD training on the net.
 
     Parameters
@@ -227,9 +195,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # `_net` is the variable used in the function (usually derived from `net`)
     _net = None
     if net is None:
-        _net = QubitNetwork(num_qubits=4,
-                            system_qubits=3,
-                            interactions='all')
+        _net = QubitNetwork(num_qubits=4, system_qubits=3, interactions='all')
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         _net = load_network_from_file(net)
@@ -270,20 +236,15 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     # is a list of states spanning the system qubits, while the second
     # element is a list of states spanning only
     dataset = _net.generate_training_data(target_gate, training_dataset_size)
-    states = theano.shared(
-        np.asarray(dataset[0], dtype=theano.config.floatX)
-    )
+    states = theano.shared(np.asarray(dataset[0], dtype=theano.config.floatX))
     target_states = theano.shared(
-        np.asarray(dataset[1], dtype=theano.config.floatX)
-    )
+        np.asarray(dataset[1], dtype=theano.config.floatX))
 
     test_dataset = _net.generate_training_data(target_gate, test_dataset_size)
     test_states = theano.shared(
-        np.asarray(test_dataset[0], dtype=theano.config.floatX)
-    )
+        np.asarray(test_dataset[0], dtype=theano.config.floatX))
     test_target_states = theano.shared(
-        np.asarray(test_dataset[1], dtype=theano.config.floatX)
-    )
+        np.asarray(test_dataset[1], dtype=theano.config.floatX))
 
     # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBSGD --------
 
@@ -297,8 +258,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
 
     _learning_rate = theano.shared(
         np.asarray(learning_rate, dtype=theano.config.floatX),
-        name='learning_rate'
-    )
+        name='learning_rate')
 
     # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
@@ -327,10 +287,9 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             outputs=cost,
             updates=updates,
             givens={
-                x: states[index * batch_size: (index + 1) * batch_size],
-                y: target_states[index * batch_size: (index + 1) * batch_size]
-            }
-        )
+                x: states[index * batch_size:(index + 1) * batch_size],
+                y: target_states[index * batch_size:(index + 1) * batch_size]
+            })
 
         # `test_model` is used to test the fidelity given by the currently
         # trained parameters. It's called at regular intervals during
@@ -340,11 +299,8 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             inputs=[],
             outputs=cost,
             updates=None,
-            givens={
-                x: test_states,
-                y: test_target_states
-            }
-        )
+            givens={x: test_states,
+                    y: test_target_states})
     else:
         train_model, test_model = precompiled_functions
 
@@ -404,8 +360,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             else:
                 if len(fids_history) == truncate_fidelity_history:
                     x_coords = np.arange(
-                        n_epoch - truncate_fidelity_history + 1,
-                        n_epoch + 1)
+                        n_epoch - truncate_fidelity_history + 1, n_epoch + 1)
                 else:
                     x_coords = np.arange(len(fids_history))
 
@@ -416,12 +371,12 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
             fig.canvas.draw()
 
             # update learning rate
-            _learning_rate.set_value(
-                learning_rate / (1 + decay_rate * n_epoch))
+            _learning_rate.set_value(learning_rate /
+                                     (1 + decay_rate * n_epoch))
 
             # generate a new set of training states
-            dataset = _net.generate_training_data(
-                target_gate, training_dataset_size)
+            dataset = _net.generate_training_data(target_gate,
+                                                  training_dataset_size)
             states.set_value(dataset[0])
             target_states.set_value(dataset[1])
     except KeyboardInterrupt:
