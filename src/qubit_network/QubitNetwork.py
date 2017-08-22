@@ -152,7 +152,7 @@ class QubitNetwork:
         if system_qubits is None:
             self.system_qubits = tuple(range(num_qubits // 2))
         elif (isinstance(system_qubits, list) and
-                all(qb < num_qubits for qb in system_qubits)):
+              all(qb < num_qubits for qb in system_qubits)):
             self.system_qubits = tuple(system_qubits)
         elif isinstance(system_qubits, int) and system_qubits <= num_qubits:
             self.system_qubits = tuple(range(system_qubits))
@@ -212,11 +212,11 @@ class QubitNetwork:
         # If a value for `J` has been given during the initialisation of
         # the `QubitNetwork` instance, then that value is directly stored
         # into `self.J`. If also  a `net_topology` has been given, a
-        # consistency check if performed.
+        # consistency check is performed.
         else:
             # If a `net_topology` has been given, check consistency:
             # the number of elements given for `J` must be equal to the
-            # number of distinct symbols specified in `net_topology`.
+            # number of distinct symbols in `net_topology`.
             if net_topology is not None:
                 num_symbols = len(set(s for s in net_topology.values()))
                 if np.asarray(J).shape[0] != num_symbols:
@@ -265,7 +265,7 @@ class QubitNetwork:
 
             outints = list(self.net_topology.keys())
 
-            # not clear if it even makes sense to use `self.interactions`
+            # not clear if it even makes sense to use `s elf.interactions`
             # if a `net_topology` has been given..
             self.interactions = outints
             self.num_interactions = len(set(self.net_topology.values()))
@@ -285,7 +285,7 @@ class QubitNetwork:
         elif isinstance(interactions, tuple):
             if interactions[0] == 'all':
                 # here we need to first iterate over the interaction
-                # types because they can be either self- or pairwise
+                # types because they can be either self or pairwise
                 # interactions, and depending on this they must be
                 # associated to single or pairs of qubits, respectively.
                 for d in interactions[1]:
@@ -320,7 +320,10 @@ class QubitNetwork:
         target, d = pair
         # if `d` indicates a self-interaction..
         if len(d) == 1:
-            term[target] = sigmas[chars2pair(d)[0]]
+            if isinstance(target, (tuple, list)):
+                term[target[0]] = sigmas[chars2pair(d)[0]]
+            else:
+                term[target] = sigmas[chars2pair(d)[0]]
         # if `d` indicates a pairwise interaction..
         elif len(d) == 2:
             term[target[0]] = sigmas[chars2pair(d)[0]]
@@ -385,7 +388,7 @@ class QubitNetwork:
             # in `symbols` (after sorting).
             for idx, symb in enumerate(symbols):
                 for pair, label in self.net_topology.items():
-                    if str(label) == symb:
+                    if str(label) == str(symb):
                         factors[idx] += self.build_H_factor(pair)
 
             if symbolic_result:
@@ -688,12 +691,12 @@ class QubitNetwork:
                                 renormalize = 0
                                 print('Can\' properly renormalize the paramete'
                                       'rs, reverting to non-renormalized form.'
-                                      )
+                                     )
                             elif len(interaction[1]) == 1 and renormalize == 4:
                                 renormalize = 0
                                 print('Can\' properly renormalize the paramete'
                                       'rs, reverting to non-renormalized form.'
-                                      )
+                                     )
                             elif renormalize == 0:
                                 if len(interaction[1]) == 2:
                                     renormalize = 4
@@ -865,10 +868,10 @@ class QubitNetwork:
             of evolving the corresponding state in `states` with the
             target gate that the training is trying to make the network
             implement.
-        return_mean : bool
+        return_mean : bool, optional
             If True, returns the average values of the fidelities.
             If False, returns an array with all the fidelities.
-        return_var : bool
+        return_var : bool, optional
             If True, together with the mean fidelity also the max - min
             of the computed fidelities is returned.
 
