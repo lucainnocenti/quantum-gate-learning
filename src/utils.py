@@ -1,4 +1,7 @@
 from collections import OrderedDict
+import operator
+import functools
+
 import json
 import numpy as np
 import qutip
@@ -93,6 +96,21 @@ def generate_ss_terms():
             term = 1j * term.data.toarray()
             sigma_pairs.append(complex2bigreal(term))
     return np.asarray(sigma_pairs)
+
+
+def pauli_matrix(n_modes, position, which_pauli):
+    sigmas = [qutip.qeye(2), qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
+    indices = [0] * n_modes
+    indices[position] = which_pauli
+    return qutip.tensor(*tuple(sigmas[index] for index in indices))
+
+
+def pauli_product(*pauli_indices):
+    n_modes = len(pauli_indices)
+    partial_product = qutip.tensor(*([qutip.qeye(2)] * n_modes))
+    for pos, pauli_index in enumerate(pauli_indices):
+        partial_product *= pauli_matrix(n_modes, pos, pauli_index)
+    return partial_product
 
 
 def chars2pair(chars):
