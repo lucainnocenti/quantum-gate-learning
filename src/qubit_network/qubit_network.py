@@ -76,6 +76,44 @@ def transfer_J_values(source_net, target_net):
     target_net.J.set_value(target_J)
 
 
+def net_parameters_to_dataframe(net, stringify_index=False):
+    """
+    Take parameters from a QubitNetwork object and put it in DataFrame.
+    
+    Parameters
+    ----------
+    stringify_index : bool
+        If True, instead of a MultiIndex the output DataFrame will have
+        a single index of strings, built applying `df.index.map(str)` to
+        the original index structure.
+    
+    Returns
+    -------
+    A `pandas.DataFrame` with the interaction parameters ordered by
+    qubits on which they act and type (interaction direction).
+    """
+    parameters = net.get_interactions_with_Js()
+    qubits = []
+    directions = []
+    values = []
+    for key, value in parameters.items():
+        try:
+            qubits.append(tuple(key[0]))
+        except TypeError:
+            qubits.append((key[0],))
+        directions.append(key[1])
+        values.append(value)
+
+    df = pd.DataFrame({
+        'qubits': qubits,
+        'directions': directions,
+        'values': values
+    }).set_index(['qubits', 'directions']).sort_index()
+    if stringify_index:
+        df.index = df.index.map(str)
+    return df
+
+
 def _gradient_updates_momentum(params, grad, learning_rate, momentum):
     '''
     Compute updates for gradient descent with momentum
@@ -320,7 +358,7 @@ def sgd_optimization(net=None, learning_rate=0.13, n_epochs=100,
     else:
         fids_history = collections.deque(maxlen=truncate_fidelity_history)
 
-    fig, ax = plt.subplots(1, 1)
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
     # The try-except block allows to stop the computation with ctrl-C
     # without losing all the computed data. This effectively makes it
