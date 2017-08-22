@@ -1,7 +1,11 @@
 import os
 import numpy as np
+import pandas as pd
+
 import matplotlib.pyplot as plt
 import seaborn as sns
+import cufflinks
+
 import qutip
 
 from utils import chop
@@ -286,3 +290,107 @@ def fidelity_vs_J(net):
         inputs=[states, target_states, xs, index_to_vary],
         outputs=fidelities
     )
+
+
+# ----------------------------------------------------------------
+# Plotting and handling visualization of net parameters
+# ----------------------------------------------------------------
+
+
+def net_parameters_to_dataframe(net, stringify_index=False):
+    """
+    Take parameters from a QubitNetwork object and put it in DataFrame.
+
+    Parameters
+    ----------
+    stringify_index : bool
+        If True, instead of a MultiIndex the output DataFrame will have
+        a single index of strings, built applying `df.index.map(str)` to
+        the original index structure.
+
+    Returns
+    -------
+    A `pandas.DataFrame` with the interaction parameters ordered by
+    qubits on which they act and type (interaction direction).
+    """
+    parameters = net.get_interactions_with_Js()
+    qubits = []
+    directions = []
+    values = []
+    for key, value in parameters.items():
+        try:
+            qubits.append(tuple(key[0]))
+        except TypeError:
+            qubits.append((key[0], ))
+        directions.append(key[1])
+        values.append(value)
+
+    pars_df = pd.DataFrame({
+        'qubits': qubits,
+        'directions': directions,
+        'values': values
+    }).set_index(['qubits', 'directions']).sort_index()
+    if stringify_index:
+        pars_df.index = pars_df.index.map(str)
+    return pars_df
+
+
+def dataframe_parameters_to_net(df, column_index, net=None):
+    """Load back the parameters to the net.
+
+    The DataFrame is expected to have the structure producd
+    by `net_parameters_to_dataframe` with the parameter
+    `stringify_index=True`.
+    """
+    # if the index is not a MultiIndex, it probably means it was
+    # stringified. Convert it back into a MultiIndex which more closely
+    # resembles the format we want.
+    if isinstance(df.index, pd.Index):
+        keys = df.index.map(eval).values
+    else:
+        keys = df.index.values
+    # in the QubitNetwork object the self-interaction
+    # qubit numbers are integeres, not tuples with a
+    # single integer.
+    for idx in range(len(keys)):
+        keys[idx] = list(keys[idx])
+        if len(keys[idx][0]) == 1:
+            keys[idx][0] = keys[idx][0][0]
+    keys = [tuple(item) for item in keys]
+    # get the interaction values we are interested in
+    interactions_values = df.iloc[:, column_index].values
+    # now we can effectively load the interactions
+    # and corresponding values into the net (and hope
+    # for the best).
+    if net is None:
+        # get maximum qubit index
+        num_qubits = max(
+            max(key[0]) if isinstance(key[0], tuple) else key[0]
+            for key in keys)
+        num_qubits += 1
+        net = QubitNetwork(
+            num_qubits,
+            system_qubits=num_qubits,
+            interactions=keys,
+            J=interactions_values)
+    else:
+        net.interactions = keys
+        net.J.set_value(interactions_values)
+
+    return net
+
+
+def plot_net_parameters(net, sort_index=True, plotly_online=False,
+                        mode='lines+markers', **kwargs):
+    df = net_parameters_to_dataframe(net, stringify_index=True)
+    # optionally sort the index, grouping together self-interactions
+    if sort_index:
+        df.index = sorted(df.index, key=lambda s: len(eval(s)[0]))
+    # decide online/offline
+    if plotly_online:
+        cufflinks.go_online()
+    else:
+        cufflinks.go_offline()
+    # plot the thing using plotly+cufflinks
+    df.iplot(kind='scatter', mode=mode, size=6,
+             title='Values of parameters', **kwargs)
