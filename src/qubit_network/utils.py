@@ -186,3 +186,14 @@ def print_OrderedDict(od):
     for k, v in od.items():
         outdict[str(k)] = v
     print(json.dumps(outdict, indent=4))
+
+
+def custom_dataframe_sort(key=None, reverse=False, cmp=None):
+    """Make a custom sorter for pandas dataframes."""
+    def sorter(df):
+        columns = list(df)
+        return [
+            columns.index(col)
+            for col in sorted(columns, key=key, reverse=reverse, cmp=cmp)
+        ]
+    return sorter
