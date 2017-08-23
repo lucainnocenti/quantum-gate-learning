@@ -296,45 +296,6 @@ def fidelity_vs_J(net):
 # Plotting and handling visualization of net parameters
 # ----------------------------------------------------------------
 
-
-def net_parameters_to_dataframe(net, stringify_index=False):
-    """
-    Take parameters from a QubitNetwork object and put it in DataFrame.
-
-    Parameters
-    ----------
-    stringify_index : bool
-        If True, instead of a MultiIndex the output DataFrame will have
-        a single index of strings, built applying `df.index.map(str)` to
-        the original index structure.
-
-    Returns
-    -------
-    A `pandas.DataFrame` with the interaction parameters ordered by
-    qubits on which they act and type (interaction direction).
-    """
-    parameters = net.get_interactions_with_Js()
-    qubits = []
-    directions = []
-    values = []
-    for key, value in parameters.items():
-        try:
-            qubits.append(tuple(key[0]))
-        except TypeError:
-            qubits.append((key[0], ))
-        directions.append(key[1])
-        values.append(value)
-
-    pars_df = pd.DataFrame({
-        'qubits': qubits,
-        'directions': directions,
-        'values': values
-    }).set_index(['qubits', 'directions']).sort_index()
-    if stringify_index:
-        pars_df.index = pars_df.index.map(str)
-    return pars_df
-
-
 def dataframe_parameters_to_net(df, column_index, net=None):
     """Load back the parameters to the net.
 
@@ -378,19 +339,3 @@ def dataframe_parameters_to_net(df, column_index, net=None):
         net.J.set_value(interactions_values)
 
     return net
-
-
-def plot_net_parameters(net, sort_index=True, plotly_online=False,
-                        mode='lines+markers', **kwargs):
-    df = net_parameters_to_dataframe(net, stringify_index=True)
-    # optionally sort the index, grouping together self-interactions
-    if sort_index:
-        df.index = sorted(df.index, key=lambda s: len(eval(s)[0]))
-    # decide online/offline
-    if plotly_online:
-        cufflinks.go_online()
-    else:
-        cufflinks.go_offline()
-    # plot the thing using plotly+cufflinks
-    df.iplot(kind='scatter', mode=mode, size=6,
-             title='Values of parameters', **kwargs)

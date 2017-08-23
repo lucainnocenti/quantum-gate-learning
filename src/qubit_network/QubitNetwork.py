@@ -1,21 +1,32 @@
+"""
+Main class implementing the qubit network.
+"""
 import itertools
 from collections import OrderedDict
 import os
-import qutip
-# import matplotlib.pyplot as plt
+import numbers
+
 import scipy.linalg
 import numpy as np
+import pandas as pd
+
+import matplotlib.pyplot as plt
+import plotly.plotly as py
+import plotly.offline
+import cufflinks
+
 import theano
 import theano.tensor as T
 import theano.tensor.slinalg  # for expm()
 import theano.tensor.nlinalg  # for trace()
+
+import qutip
+
 from utils import chars2pair, complex2bigreal, bigreal2complex, chop
 
-from _QubitNetwork import (_ket_to_dm, _split_bigreal_ket, _compute_fidelities,
-                           _compute_fidelities_col_fn,
-                           _compute_fidelities_row_fn,
-                           _compute_fidelities_no_ptrace)
-
+from ._QubitNetwork import (_compute_fidelities,
+                            _compute_fidelities_no_ptrace)
+# pylint: disable=invalid-name
 
 class QubitNetwork:
     def __init__(self, num_qubits, system_qubits=None,
@@ -95,6 +106,24 @@ class QubitNetwork:
         # the `QubitNetwork` instance, then that value is directly stored
         # into `self.J`. If also  a `net_topology` has been given, a
         # consistency check is performed.
+        # If this value is simply a number, it is used to initialize the
+        # whole array to that value.
+        elif isinstance(J, numbers.Number):
+            self.J = theano.shared(
+                value=np.ones(self.num_interactions) * J,
+                name='J',
+                borrow=True
+            )
+        # `J` can also be a dictionary, to explicitly insert initial
+        # conditions on the parameters.
+        elif isinstance(J, dict):
+            if net_topology is None:
+                J_ = np.zeros(self.num_interactions)
+                for target, value in J.items():
+                    J_[self.interactions.index(target)] = value
+                self.J = theano.shared(value=J_, name='J', borrow=True)
+            else:
+                raise NotImplementedError('Haven\' done it yet!')
         else:
             # If a `net_topology` has been given, check consistency:
             # the number of elements given for `J` must be equal to the
@@ -443,8 +472,6 @@ class QubitNetwork:
             with open(outfile, 'w') as fp:
                 json.dump(data, fp, indent=4)
 
-    # def tuple_to_interaction_index(self, pair):
-    #     self.interactions.index(pair)
 
     def tuple_to_J_index(self, interaction):
         if self.net_topology is None:
@@ -514,7 +541,7 @@ class QubitNetwork:
                 self.J.set_value(Js)
                 del self.net_topology_symbols[symbols.index(symbol)]
 
-    def get_current_gate(self, return_Qobj=True, chop_eps=None):
+    def get_current_gate(self, return_qobj=True, chop_eps=None):
         """Returns the currently produced unitary, in complex form."""
         gate = self.build_H_factors(symbolic_result=False)
         gate = scipy.linalg.expm(gate)
@@ -522,10 +549,26 @@ class QubitNetwork:
         if chop_eps is not None:
             gate = chop(gate, chop_eps)
 
-        if return_Qobj:
+        if return_qobj:
             return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
         else:
             return gate
+
+    def get_grouped_interactions(self):
+        """
+        Return list of interactions, taking the topology into account.
+        """
+        if self.net_topology is None:
+            return self.interactions
+        else:
+            outlist = []
+            for symbol in self.net_topology_symbols:
+                matching_interactions = []
+                for interaction, label in self.net_topology.items():
+                    if label == symbol:
+                        matching_interactions.append(interaction)
+                outlist.append(matching_interactions)
+            return outlist
 
     def get_interactions_with_Js(self, renormalize_parameters=False):
         """
@@ -761,7 +804,7 @@ class QubitNetwork:
         -------
         A theano function, to be used for the MSGD algorithm
         """
-
+        # pylint: disable=C0103
         # this builds the Hamiltonian of the system (in big real matrix form),
         # already multiplied with the -1j factor and ready for exponentiation
         H = self.build_H_factors()
@@ -812,3 +855,56 @@ class QubitNetwork:
             # return the array with all of the computed fidelities
             # (one for each training state in the batch)
             return fidelities
+    
+    def net_parameters_to_dataframe(self, stringify_index=False):
+        """
+        Take parameters from a QubitNetwork object and put it in DataFrame.
+
+        Parameters
+        ----------
+        stringify_index : bool
+            If True, instead of a MultiIndex the output DataFrame will have
+            a single index of strings, built applying `df.index.map(str)` to
+            the original index structure.
+
+        Returns
+        -------
+        A `pandas.DataFrame` with the interaction parameters ordered by
+        qubits on which they act and type (interaction direction).
+        """
+        parameters = self.get_interactions_with_Js()
+        qubits = []
+        directions = []
+        values = []
+        for key, value in parameters.items():
+            try:
+                qubits.append(tuple(key[0]))
+            except TypeError:
+                qubits.append((key[0], ))
+            directions.append(key[1])
+            values.append(value)
+
+        pars_df = pd.DataFrame({
+            'qubits': qubits,
+            'directions': directions,
+            'values': values
+        }).set_index(['qubits', 'directions']).sort_index()
+        if stringify_index:
+            pars_df.index = pars_df.index.map(str)
+        return pars_df
+
+    def plot_net_parameters(self, sort_index=True, plotly_online=False,
+                            mode='lines+markers', **kwargs):
+        """Plot the current values of the parameters of the network."""
+        df = self.net_parameters_to_dataframe(stringify_index=True)
+        # optionally sort the index, grouping together self-interactions
+        if sort_index:
+            df.index = sorted(df.index, key=lambda s: len(eval(s)[0]))
+        # decide online/offline
+        if plotly_online:
+            cufflinks.go_online()
+        else:
+            cufflinks.go_offline()
+        # plot the thing using plotly+cufflinks
+        return df.iplot(kind='scatter', mode=mode, size=6,
+                        title='Values of parameters', **kwargs)
