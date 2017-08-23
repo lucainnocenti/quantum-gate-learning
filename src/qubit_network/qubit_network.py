@@ -327,10 +327,13 @@ def sgd_optimization(
 
             # compute fidelity and update parameters
             for minibatch_index in range(n_train_batches):
-                minibatch_avg_cost = train_model(minibatch_index)
+                train_model(minibatch_index)
 
             # update fidelity history
             fids_history.append(test_model())
+            if fids_history[-1] == 1:
+                print('Fidelity 1 obtained, stopping.')
+                break
 
             # new_fidelities = np.array(test_model())
             # new_fidelities = new_fidelities.reshape(
