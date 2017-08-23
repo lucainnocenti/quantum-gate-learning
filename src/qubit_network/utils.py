@@ -1,7 +1,7 @@
+"""
+A collection of utility functions not yet categorized.
+"""
 from collections import OrderedDict
-import operator
-import functools
-
 import json
 import numpy as np
 import qutip
