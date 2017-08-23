@@ -194,6 +194,6 @@ def custom_dataframe_sort(key=None, reverse=False, cmp=None):
         columns = list(df)
         return [
             columns.index(col)
-            for col in sorted(columns, key=key, reverse=reverse, cmp=cmp)
+            for col in sorted(columns, key=key, reverse=reverse)
         ]
     return sorter

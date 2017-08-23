@@ -8,7 +8,7 @@ import cufflinks
 
 import qutip
 
-from utils import chop
+from .utils import chop
 
 
 def group_similar_elements(numbers, eps=1e-3):
