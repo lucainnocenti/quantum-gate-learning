@@ -1,4 +1,8 @@
 import os
+import glob
+import fnmatch
+import pprint
+
 import numpy as np
 import pandas as pd
 
@@ -8,6 +12,7 @@ import cufflinks
 
 import qutip
 
+from .QubitNetwork import QubitNetwork
 from .utils import chop
 
 
@@ -339,3 +344,188 @@ def dataframe_parameters_to_net(df, column_index, net=None):
         net.J.set_value(interactions_values)
 
     return net
+
+
+# ----------------------------------------------------------------
+# Loading nets from file
+# ----------------------------------------------------------------
+
+
+def _load_network_from_pickle(filename):
+    """
+    Rebuild `QubitNetwork` from pickled data in `filename`.
+
+    The QubitNetwork objects should have been stored into the file in
+    pickle format, using the appropriate `save_to_file` method.
+    """
+
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+
+    if 'target_gate' not in data.keys():
+        data['target_gate'] = None
+
+    if 'net_topology' not in data.keys():
+        data['net_topology'] = None
+
+    if 'ancillae_state' not in data.keys():
+        num_ancillae = data['num_qubits'] - data['num_system_qubits']
+        data['ancillae_state'] = qutip.tensor(
+            [qutip.basis(2, 0) for _ in range(num_ancillae)])
+
+    net = QubitNetwork(
+        num_qubits=data['num_qubits'],
+        interactions=data['interactions'],
+        system_qubits=data['num_system_qubits'],
+        ancillae_state=data['ancillae_state'],
+        target_gate=data['target_gate'],
+        net_topology=data['net_topology'],
+        J=data['J'])
+    return net
+
+
+def _load_network_from_json(filename):
+    raise NotImplementedError('Not implemented yet, load from pickle.')
+
+
+def load_network_from_file(filename, fmt=None):
+    """
+    Rebuild `QubitNetwork` object from data in `filename`.
+    """
+    # if no format has been given, get it from the file name
+    if fmt is None:
+        _, fmt = os.path.splitext(filename)
+    # decide which function to call to load the data
+    if fmt == 'pickle':
+        return _load_network_from_pickle(filename)
+    elif fmt == 'json':
+        return _load_network_from_json(filename)
+    else:
+        raise ValueError('Only pickle or json formats are supported.')
+
+
+class NetDataFile:
+    """
+    Represent a single data file containing a saved net.
+    """
+    def __init__(self, path):
+        self.path = path
+        self.full_name = os.path.split(path)[1]
+        self.name, self.ext = os.path.splitext(self.full_name)
+        self.data = None
+
+    def __repr__(self):
+        return self.name + ' (' + self.ext[1:] + ')'
+
+    def _load(self):
+        """
+        Read data from the stored path and save it into `self.data`.
+
+        If the data was already loaded, it is loaded again.
+        """
+        self.data = load_network_from_file(self.path)
+
+    def get_target_gate(self):
+        """
+        Assuming the naming convention 'gatename_blabla_otherinfo.pickle'
+        """
+        if '_' not in self.name:
+            return self.name
+        else:
+            return self.name.split('_')[0]
+
+
+class NetsDataFolder:
+    """
+    Class representing a folder containing nets data files.
+
+    This function assumes that all the `.json` and `.pickle` files in
+    the given directory are files containing a `QubitNetwork` object in
+    appropriate format.
+    """
+    def __init__(self, path):
+        # raise error if path is not a directory
+        if not os.path.isdir(path):
+            raise ValueError('path must be a valid directory.')
+        self.path = path
+        # load json and pickle files in path
+        self.files = {
+            'json': glob.glob(path + '*.json'),
+            'pickle': glob.glob(path + '*.pickle')
+        }
+        nets_list = self.get_unique_filenames()
+        # raise error if no json and pickle files are found
+        if len(nets_list) == 0:
+            raise FileNotFoundError('No valid data files found in '
+                                    '{}.'.format(path))
+        # for each data file associate a `NetDataFile` object, and store
+        # the collection of such objects in `self.nets`.
+        self.nets = []
+        def get_gate(name):
+            name = os.path.splitext(os.path.split(name)[1])[0]
+            if '_' in name:
+                return name.split('_')[0]
+            else:
+                return name
+        for net_name in sorted(nets_list, key=get_gate):
+            if net_name + '.pickle' in self.files['pickle']:
+                new_net = NetDataFile(net_name + '.pickle')
+            else:
+                new_net = NetDataFile(net_name + '.json')
+            self.nets.append(new_net)
+
+    def __repr__(self):
+        return self._repr_dataframe().__repr__()
+
+    def _repr_html_(self):
+        return self._repr_dataframe()._repr_html_()
+
+    def _repr_dataframe(self):
+        names = [net.name for net in self.nets]
+        target_gates = [net.get_target_gate() for net in self.nets]
+        # load sorted data in pandas DataFrame
+        df = pd.DataFrame({
+            'target gates': target_gates,
+            'names': names
+        })[['target gates', 'names']]
+        # return formatted string
+        return df
+
+    def __getitem__(self, key):
+        try:
+            return self.nets[key]
+        # if numbered indexing didn't work, we try assuming  `key` is
+        # a string, and look for matching net names.
+        except TypeError:
+            # if `key` contains a wildcard, use is to match using filter
+            if '*' in key:
+                matching_nets = list(self.filter(key))
+            # otherwise assume it just denotes the beginning of the name
+            else:
+                matching_nets = list(self.filter(key + '*'))
+
+            return matching_nets
+
+    def filter(self, pat):
+        """
+        Return a subset of the nets in `self.nets` satisfying condition.
+
+        Simple wildcard matching provided by `fnmatch.filter` is used.
+        """
+        new_data = NetsDataFolder(self.path)
+        new_data.files['json'] =  fnmatch.filter(self.files['json'], pat)
+        new_data.files['pickle'] =  fnmatch.filter(self.files['pickle'], pat)
+        new_data.nets = [net for net in self.nets
+                         if fnmatch.fnmatch(net.name, pat)]
+        return new_data
+        # names = fnmatch.filter([net.name for net in self.nets], pat)
+        # for net in self.nets:
+        #     if net.name in names:
+        #         yield net
+
+
+    def get_unique_filenames(self):
+        nets_list = sum(self.files.values(), [])
+        nets_list = set(os.path.splitext(name)[0] for name in nets_list)
+        return list(nets_list)
+

@@ -24,59 +24,6 @@ import theano.tensor as T
 from .QubitNetwork import QubitNetwork
 
 
-def _load_network_from_pickle(filename):
-    """
-    Rebuild `QubitNetwork` from pickled data in `filename`.
-
-    The QubitNetwork objects should have been stored into the file in
-    pickle format, using the appropriate `save_to_file` method.
-    """
-
-    with open(filename, 'rb') as file:
-        data = pickle.load(file)
-
-    if 'target_gate' not in data.keys():
-        data['target_gate'] = None
-
-    if 'net_topology' not in data.keys():
-        data['net_topology'] = None
-
-    if 'ancillae_state' not in data.keys():
-        num_ancillae = data['num_qubits'] - data['num_system_qubits']
-        data['ancillae_state'] = qutip.tensor(
-            [qutip.basis(2, 0) for _ in range(num_ancillae)])
-
-    net = QubitNetwork(
-        num_qubits=data['num_qubits'],
-        interactions=data['interactions'],
-        system_qubits=data['num_system_qubits'],
-        ancillae_state=data['ancillae_state'],
-        target_gate=data['target_gate'],
-        net_topology=data['net_topology'],
-        J=data['J'])
-    return net
-
-
-def _load_network_from_json(filename):
-    raise NotImplementedError('Not implemented yet, load from pickle.')
-
-
-def load_network_from_file(filename, fmt=None):
-    """
-    Rebuild `QubitNetwork` object from data in `filename`.
-    """
-    # if no format has been given, get it from the file name
-    if fmt is None:
-        _, fmt = os.path.splitext(filename)
-    # decide which function to call to load the data
-    if fmt == 'pickle':
-        return _load_network_from_pickle(filename)
-    elif fmt == 'json':
-        return _load_network_from_json(filename)
-    else:
-        raise ValueError('Only pickle or json formats are supported.')
-
-
 def transfer_J_values(source_net, target_net):
     """
     Transfer the values of the interactions from source to target net.
