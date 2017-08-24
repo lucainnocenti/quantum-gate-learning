@@ -928,18 +928,21 @@ class QubitNetwork:
             cufflinks.go_offline()
         # draw overlapping horizontal lines for reference if asked
         if overlay_hlines is None:
-            return df.iplot(kind='scatter', mode=mode, size=6,
-                            title='Values of parameters',
-                            asFigure=asFigure, **kwargs)
+            overlay_hlines = np.arange(-np.pi, np.pi, np.pi / 2)
+            # return df.iplot(kind='scatter', mode=mode, size=6,
+            #                 title='Values of parameters',
+            #                 asFigure=asFigure, **kwargs)
+        from .plotly_utils import hline
+        fig = df.iplot(kind='scatter', mode=mode, size=6,
+                        title='Values of parameters',
+                        text=df.index.tolist(),
+                        asFigure=True, **kwargs)
+        fig.layout.shapes = hline(0, len(self.interactions),
+                                    overlay_hlines, dash='dash')
+        fig.data[0].textposition = 'top'
+        fig.data[0].textfont = dict(color='white', size=13)
+        if asFigure:
+            return fig
         else:
-            from .plotly_utils import hline
-            fig = df.iplot(kind='scatter', mode=mode, size=6,
-                           title='Values of parameters',
-                           text=df.index.tolist(),
-                           asFigure=True, **kwargs)
-            fig.layout.shapes = hline(0, len(self.interactions),
-                                      overlay_hlines, dash='dash')
-            fig.data[0].textposition = 'top'
-            fig.data[0].textfont = dict(color='white', size=13)
             return plotly.offline.iplot(fig)
             
