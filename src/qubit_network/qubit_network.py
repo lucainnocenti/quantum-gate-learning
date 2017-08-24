@@ -6,7 +6,6 @@ methods in this module write or modify data saved in `QubitNetwork` objects,
 rather than just reading and analysing it.
 """
 
-import pickle
 import collections
 import os
 

@@ -2,6 +2,8 @@ import os
 import glob
 import fnmatch
 import pprint
+import pickle
+import collections
 
 import numpy as np
 import pandas as pd
@@ -412,10 +414,16 @@ class NetDataFile:
         self.path = path
         self.full_name = os.path.split(path)[1]
         self.name, self.ext = os.path.splitext(self.full_name)
-        self.data = None
+        # the above returns something like `.pickle` instead of `pickle`
+        self.ext = self.ext[1:]
+        # the actual `QubitNetwork` object is only loaded when required
+        self._data = None
 
     def __repr__(self):
-        return self.name + ' (' + self.ext[1:] + ')'
+        return self.name + ' (' + self.ext + ')'
+
+    def __getattr__(self, value):
+        return getattr(self.data, value)
 
     def _load(self):
         """
@@ -423,16 +431,52 @@ class NetDataFile:
 
         If the data was already loaded, it is loaded again.
         """
-        self.data = load_network_from_file(self.path)
+        self._data = load_network_from_file(self.path, fmt=self.ext)
 
     def get_target_gate(self):
         """
-        Assuming the naming convention 'gatename_blabla_otherinfo.pickle'
+        Return the name of the target gate according to the file name.
+
+        This function assumes that the file name follows the naming
+        convention 'gatename_blabla_otherinfo.pickle'.
         """
         if '_' not in self.name:
             return self.name
         else:
             return self.name.split('_')[0]
+
+    @property
+    def data(self):
+        """
+        The actual `QubitNetwork` object, loaded from file on demand.
+        """
+        if self._data is None:
+            self._load()
+        return self._data
+
+    @property
+    def interactions(self):
+        """
+        Gives the trained interactions in a nicely formatted DataFrame.
+        """
+        # from IPython.core.debugger import set_trace; set_trace()
+        interactions_pairs = self.data.get_interactions_with_Js()
+        interactions, values = list(zip(*interactions_pairs.items()))
+        qubits, type_ = list(zip(*interactions))
+        # ensure that also self-interaction targets are tuples
+        def ensure_tuple(pair):
+            try:
+                tuple(pair)
+            except TypeError:
+                pair = (pair,)
+            return pair
+        qubits = [ensure_tuple(qubit) for qubit in qubits]
+        # now put everything in dataframe
+        return pd.DataFrame({
+            'qubits': qubits,
+            'type': type_,
+            'value': values
+        }).set_index(['qubits', 'type'])
 
 
 class NetsDataFolder:
@@ -505,6 +549,18 @@ class NetsDataFolder:
                 matching_nets = list(self.filter(key + '*'))
 
             return matching_nets
+
+    def short(self):
+        """
+        Return a shortened version of the list of saved nets.
+        """
+        nets_in_df = self._repr_dataframe()
+        counts = collections.Counter(nets_in_df['target gates'])
+        unique_gates = nets_in_df['target gates'].unique()
+        return pd.DataFrame({
+            'target gate': unique_gates,
+            'number of saved nets': list(counts.values())
+        })[['target gate', 'number of saved nets']]
 
     def filter(self, pat):
         """
