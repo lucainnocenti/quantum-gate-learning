@@ -22,7 +22,8 @@ import theano.tensor.nlinalg  # for trace()
 
 import qutip
 
-from utils import chars2pair, complex2bigreal, bigreal2complex, chop
+from .utils import (chars2pair, complex2bigreal, bigreal2complex, chop,
+                    custom_dataframe_sort)
 
 from ._QubitNetwork import (_compute_fidelities,
                             _compute_fidelities_no_ptrace)
@@ -140,6 +141,7 @@ class QubitNetwork:
                 name='J',
                 borrow=True
             )
+        self.initial_conditions = self.J.get_value()
 
 
     def parse_interactions(self, interactions):
@@ -416,7 +418,8 @@ class QubitNetwork:
                 'interactions': self.interactions,
                 'target_gate': self.target_gate,
                 'net_topology': self.net_topology,
-                'J': self.J.get_value()
+                'J': self.J.get_value(),
+                'initial_conditions': self.initial_conditions
             }
             if not os.path.isabs(outfile):
                 outfile = os.path.join(os.getcwd(), outfile)
@@ -468,6 +471,7 @@ class QubitNetwork:
 
             data['interactions'] = self.interactions
             data['J'] = self.J.get_value().tolist()
+            data['initial_conditions'] = self.initial_conditions.tolist()
 
             with open(outfile, 'w') as fp:
                 json.dump(data, fp, indent=4)
@@ -894,17 +898,38 @@ class QubitNetwork:
         return pars_df
 
     def plot_net_parameters(self, sort_index=True, plotly_online=False,
-                            mode='lines+markers', **kwargs):
+                            mode='lines+markers', overlay_hlines=None,
+                            asFigure=False, **kwargs):
         """Plot the current values of the parameters of the network."""
-        df = self.net_parameters_to_dataframe(stringify_index=True)
+        df = self.net_parameters_to_dataframe()
         # optionally sort the index, grouping together self-interactions
         if sort_index:
-            df.index = sorted(df.index, key=lambda s: len(eval(s)[0]))
+            def sorter(elem):
+                return len(elem[0][0])
+            sorted_data = sorted(list(df.iloc[:, 0].to_dict().items()),
+                                 key=sorter)
+            x, y = tuple(zip(*sorted_data))
+            df = pd.DataFrame({'x': x, 'y': y}).set_index('x')
+            df.index = df.index.map(str)
         # decide online/offline
         if plotly_online:
             cufflinks.go_online()
         else:
             cufflinks.go_offline()
-        # plot the thing using plotly+cufflinks
-        return df.iplot(kind='scatter', mode=mode, size=6,
-                        title='Values of parameters', **kwargs)
+        # draw overlapping horizontal lines for reference if asked
+        if overlay_hlines is None:
+            return df.iplot(kind='scatter', mode=mode, size=6,
+                            title='Values of parameters',
+                            asFigure=asFigure, **kwargs)
+        else:
+            from .plotly_utils import hline
+            fig = df.iplot(kind='scatter', mode=mode, size=6,
+                           title='Values of parameters',
+                           text=df.index.tolist(),
+                           asFigure=True, **kwargs)
+            fig.layout.shapes = hline(0, len(self.interactions),
+                                      overlay_hlines, dash='dash')
+            fig.data[0].textposition = 'top'
+            fig.data[0].textfont = dict(color='white', size=13)
+            return plotly.offline.iplot(fig)
+            
