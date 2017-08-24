@@ -5,6 +5,8 @@ import itertools
 from collections import OrderedDict
 import os
 import numbers
+import re
+import warnings
 
 import scipy.linalg
 import numpy as np
@@ -26,7 +28,8 @@ from .utils import (chars2pair, complex2bigreal, bigreal2complex, chop,
                     custom_dataframe_sort)
 
 from ._QubitNetwork import (_compute_fidelities,
-                            _compute_fidelities_no_ptrace)
+                            _compute_fidelities_no_ptrace,
+                            _find_suitable_name)
 # pylint: disable=invalid-name
 
 class QubitNetwork:
@@ -409,6 +412,13 @@ class QubitNetwork:
         fmt : Format of output file.
             Possible values are 'pickle' and 'json'.
         """
+        # change name if file already exists
+        _outfile = _find_suitable_name(outfile)
+        if _outfile != outfile:
+            warnings.warn('File already existing, saving instead in'
+                          ' {}.'.format(_outfile))
+            outfile = _outfile
+        # check format
         if fmt == 'pickle':
             import pickle
             data = {
