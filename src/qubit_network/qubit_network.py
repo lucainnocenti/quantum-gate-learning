@@ -8,6 +8,7 @@ rather than just reading and analysing it.
 
 import pickle
 import collections
+import os
 
 import numpy as np
 import pandas as pd
@@ -23,14 +24,15 @@ import theano.tensor as T
 from .QubitNetwork import QubitNetwork
 
 
-def load_network_from_file(infile):
-    """Returns a QubitNetwork object created from the file `infile`.
+def _load_network_from_pickle(filename):
+    """
+    Rebuild `QubitNetwork` from pickled data in `filename`.
 
     The QubitNetwork objects should have been stored into the file in
     pickle format, using the appropriate `save_to_file` method.
     """
 
-    with open(infile, 'rb') as file:
+    with open(filename, 'rb') as file:
         data = pickle.load(file)
 
     if 'target_gate' not in data.keys():
@@ -53,6 +55,26 @@ def load_network_from_file(infile):
         net_topology=data['net_topology'],
         J=data['J'])
     return net
+
+
+def _load_network_from_json(filename):
+    raise NotImplementedError('Not implemented yet, load from pickle.')
+
+
+def load_network_from_file(filename, fmt=None):
+    """
+    Rebuild `QubitNetwork` object from data in `filename`.
+    """
+    # if no format has been given, get it from the file name
+    if fmt is None:
+        _, fmt = os.path.splitext(filename)
+    # decide which function to call to load the data
+    if fmt == 'pickle':
+        return _load_network_from_pickle(filename)
+    elif fmt == 'json':
+        return _load_network_from_json(filename)
+    else:
+        raise ValueError('Only pickle or json formats are supported.')
 
 
 def transfer_J_values(source_net, target_net):
