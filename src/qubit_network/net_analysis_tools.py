@@ -487,7 +487,7 @@ class NetsDataFolder:
     the given directory are files containing a `QubitNetwork` object in
     appropriate format.
     """
-    def __init__(self, path):
+    def __init__(self, path='../data/nets/'):
         # raise error if path is not a directory
         if not os.path.isdir(path):
             raise ValueError('path must be a valid directory.')
@@ -569,8 +569,8 @@ class NetsDataFolder:
         Simple wildcard matching provided by `fnmatch.filter` is used.
         """
         new_data = NetsDataFolder(self.path)
-        new_data.files['json'] =  fnmatch.filter(self.files['json'], pat)
-        new_data.files['pickle'] =  fnmatch.filter(self.files['pickle'], pat)
+        new_data.files['json'] = fnmatch.filter(self.files['json'], pat)
+        new_data.files['pickle'] = fnmatch.filter(self.files['pickle'], pat)
         new_data.nets = [net for net in self.nets
                          if fnmatch.fnmatch(net.name, pat)]
         return new_data
@@ -585,3 +585,62 @@ class NetsDataFolder:
         nets_list = set(os.path.splitext(name)[0] for name in nets_list)
         return list(nets_list)
 
+    def reload(self):
+        self = NetsDataFolder(self.path)
+        return self
+
+    def view_fidelities(self, n_samples=40):
+        data = self._repr_dataframe()
+        fids = [net.test_fidelity_without_theano(n_samples=n_samples)
+                for net in self.nets]
+        data = pd.concat((
+            data,
+            pd.Series(fids, name='fidelity')
+        ), axis=1)
+        return data
+
+    def view_parameters(self, n_samples=40):
+        """
+        Return a dataframe showing the parameters for every net.
+        """
+        data = None
+        for net in self.nets:
+            # compute fidelity for net
+            fid = net.test_fidelity_without_theano(n_samples=n_samples)
+            # get data for net
+            new_df = net.interactions.rename(columns={'value': fid})
+            if data is None:
+                data = new_df
+                continue
+            data = pd.concat((data, new_df), axis=1)
+        return data
+
+    def plot_parameters(self, joined=True, hlines=None):
+        """
+        Plot an overlay scatter plot of all the nets.
+        """
+        data = self.view_parameters()
+        fids = data.columns
+        data.columns = np.arange(len(fids))
+        # stringify indices for the legend later
+        data.index = data.index.map(str)
+        fig = data.iplot(mode='lines+markers', size=6, asFigure=True)
+        # readd legend labels (this is necessary because cufflinks
+        # seems to make a mess when multiple columns have the same name)
+        for trace_idx in range(len(fig.data)):
+            fig.data[trace_idx].name = fids[trace_idx]
+        for trace in fig.data:
+            if joined:
+                trace.update({'connectgaps': True})
+            else:
+                trace.update({'connectgaps': False,
+                              'mode': 'markers'})
+        # put overlay hlines
+        from .plotly_utils import hline
+        if hlines is None:
+            hlines = np.arange(-np.pi, np.pi, np.pi / 2)
+        fig.layout.shapes = hline(0, len(data) - 1,
+                                  hlines, dash='dash')
+        # finally draw the damn thing
+        import plotly.offline
+        plotly.offline.iplot(fig)

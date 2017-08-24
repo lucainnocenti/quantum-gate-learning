@@ -124,6 +124,10 @@ class QubitNetwork:
             if net_topology is None:
                 J_ = np.zeros(self.num_interactions)
                 for target, value in J.items():
+                    # if target[0] is a single-element tuple, make it
+                    # into the corresponding integer
+                    if not isinstance(target[0], int) and len(target[0]) == 1:
+                        target = (target[0][0], target[1])
                     J_[self.interactions.index(target)] = value
                 self.J = theano.shared(value=J_, name='J', borrow=True)
             else:
@@ -404,7 +408,7 @@ class QubitNetwork:
 
         return np.asarray(training_states), np.asarray(target_states)
 
-    def save_to_file(self, outfile, fmt='pickle'):
+    def save_to_file(self, outfile, fmt='pickle', overwrite=False):
         """ Saves the currently trained net in a file.
 
         Parameters
@@ -412,12 +416,13 @@ class QubitNetwork:
         fmt : Format of output file.
             Possible values are 'pickle' and 'json'.
         """
-        # change name if file already exists
-        _outfile = _find_suitable_name(outfile)
-        if _outfile != outfile:
-            warnings.warn('File already existing, saving instead in'
-                          ' {}.'.format(_outfile))
-            outfile = _outfile
+        if not overwrite:
+            # change name if file already exists
+            _outfile = _find_suitable_name(outfile)
+            if _outfile != outfile:
+                warnings.warn('File already existing, saving instead in'
+                            ' {}.'.format(_outfile))
+                outfile = _outfile
         # check format
         if fmt == 'pickle':
             import pickle
@@ -908,7 +913,8 @@ class QubitNetwork:
         return pars_df
 
     def plot_net_parameters(self, sort_index=True, plotly_online=False,
-                            mode='lines+markers', overlay_hlines=None,
+                            mode='lines+markers+text',
+                            overlay_hlines=None,
                             asFigure=False, **kwargs):
         """Plot the current values of the parameters of the network."""
         df = self.net_parameters_to_dataframe()
@@ -934,9 +940,9 @@ class QubitNetwork:
             #                 asFigure=asFigure, **kwargs)
         from .plotly_utils import hline
         fig = df.iplot(kind='scatter', mode=mode, size=6,
-                        title='Values of parameters',
-                        text=df.index.tolist(),
-                        asFigure=True, **kwargs)
+                       title='Values of parameters',
+                       text=df.index.tolist(),
+                       asFigure=True, **kwargs)
         fig.layout.shapes = hline(0, len(self.interactions),
                                     overlay_hlines, dash='dash')
         fig.data[0].textposition = 'top'
