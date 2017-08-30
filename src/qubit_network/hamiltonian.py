@@ -54,7 +54,7 @@ class QubitNetworkHamiltonian:
                  different parameter assigned.
     """
 
-    def __init__(self, n_qubits=None, expr=None, parameters=None, topology=None):
+    def __init__(self, expr=None, num_qubits=None, parameters=None, topology=None):
         # initialize class attributes
         self.matrices = None
         self.free_parameters = None
@@ -84,9 +84,10 @@ class QubitNetworkHamiltonian:
 
     def _get_bigreal_matrices(self):
         """
-        Return the elements of `self.matrices` as big real matrices.
+        Multiply each element of `self.matrices` with `-1j`, and return
+        them converted to big real form.
         """
-        return [complex2bigreal(matrix).astype(np.float)
+        return [complex2bigreal(-1j * matrix).astype(np.float)
                 for matrix in self.matrices]
 
     def build_theano_graph(self):

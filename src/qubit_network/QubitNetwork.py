@@ -26,19 +26,37 @@ import qutip
 
 from .utils import (chars2pair, complex2bigreal, bigreal2complex, chop,
                     custom_dataframe_sort)
-
 from ._QubitNetwork import (_compute_fidelities,
                             _compute_fidelities_no_ptrace,
                             _find_suitable_name)
-# pylint: disable=invalid-name
+from .hamiltonian import QubitNetworkHamiltonian
+
 
 class QubitNetwork:
+    """
+    Main object representing the qubit network.
+    """
     def __init__(self, num_qubits, system_qubits=None,
                  interactions='all',
                  ancillae_state=None,
                  target_gate=None,
                  net_topology=None,
+                 sympy_expr=None,
                  J=None):
+        # parameters initialization
+        self.num_qubits = None
+        self.system_qubits = None
+        self.target_gate = None
+        self.num_ancillae = None
+        self.num_system_qubits = None
+        self.pairs = None
+        self.net_topology = None
+        self.interactions = None
+        self.ancillae_state = None
+        self.J = None
+        self.initial_conditions = None
+        self.hamiltonian = None  # for now only used with `sympy_expr`
+
         # `self.num_qubits` is the TOTAL number of qubits in the
         # network, regardless of them being system or ancilla qubits
         self.num_qubits = num_qubits
@@ -78,6 +96,9 @@ class QubitNetwork:
         # variables. Note that if `net_topology` is not None, then the
         # the value of `interactions` is not actually used to fill
         # `self.interactions`.
+        # NOTE: If the hamiltonian is given through the `sympy_expr`
+        #       parameter, the `self.interactions` attribute does not
+        #       make much sense in general and is not even set
         self.parse_interactions(interactions)
 
         # Build the initial state of the ancillae, if there are any
@@ -89,65 +110,73 @@ class QubitNetwork:
         else:
             self.ancillae_state = None
 
-        # If no value of `J` has been given, then `self.J` is initialised
-        # with random values. The length of the array is chosen using
-        # the value of `self.num_interactions`, or `net_topology` if given.
-        if J is None:
-            if net_topology is None:
-                self.J = theano.shared(
-                    value=np.random.randn(self.num_interactions),
-                    name='J',
-                    borrow=True
-                )
-            else:
-                num_symbols = len(set(net_topology.values()))
-                self.J = theano.shared(
-                    value=np.random.randn(num_symbols),
-                    name='J',
-                    borrow=True
-                )
-        # If a value for `J` has been given during the initialisation of
-        # the `QubitNetwork` instance, then that value is directly stored
-        # into `self.J`. If also  a `net_topology` has been given, a
-        # consistency check is performed.
-        # If this value is simply a number, it is used to initialize the
-        # whole array to that value.
-        elif isinstance(J, numbers.Number):
-            self.J = theano.shared(
-                value=np.ones(self.num_interactions) * J,
-                name='J',
-                borrow=True
-            )
-        # `J` can also be a dictionary, to explicitly insert initial
-        # conditions on the parameters.
-        elif isinstance(J, dict):
-            if net_topology is None:
-                J_ = np.zeros(self.num_interactions)
-                for target, value in J.items():
-                    # if target[0] is a single-element tuple, make it
-                    # into the corresponding integer
-                    if not isinstance(target[0], int) and len(target[0]) == 1:
-                        target = (target[0][0], target[1])
-                    J_[self.interactions.index(target)] = value
-                self.J = theano.shared(value=J_, name='J', borrow=True)
-            else:
-                raise NotImplementedError('Haven\' done it yet!')
+        # NOTE: This is to be fixed. For now the old system to fill in
+        #       the `self.J` attribute is used if no `sympy_expr` argument
+        #       has been given. In the future also the old method should
+        #       be implemented through `QubitNetworkHamiltonian`.
+        if sympy_expr is not None:
+            self.hamiltonian = QubitNetworkHamiltonian(expr=sympy_expr)
+            self.J = self.hamiltonian.J
         else:
-            # If a `net_topology` has been given, check consistency:
-            # the number of elements given for `J` must be equal to the
-            # number of distinct symbols in `net_topology`.
-            if net_topology is not None:
-                num_symbols = len(set(s for s in net_topology.values()))
-                if np.asarray(J).shape[0] != num_symbols:
-                    raise ValueError('The number of specified parameters is '
-                                     'not consistent with the value of `net'
-                                     '_topology`.')
+            # If no value of `J` has been given, then `self.J` is initialised
+            # with random values. The length of the array is chosen using
+            # the value of `self.num_interactions`, or `net_topology` if given.
+            if J is None:
+                if net_topology is None:
+                    self.J = theano.shared(
+                        value=np.random.randn(self.num_interactions),
+                        name='J',
+                        borrow=True
+                    )
+                else:
+                    num_symbols = len(set(net_topology.values()))
+                    self.J = theano.shared(
+                        value=np.random.randn(num_symbols),
+                        name='J',
+                        borrow=True
+                    )
+            # If a value for `J` has been given during the initialisation of
+            # the `QubitNetwork` instance, then that value is directly stored
+            # into `self.J`. If also  a `net_topology` has been given, a
+            # consistency check is performed.
+            # If this value is simply a number, it is used to initialize the
+            # whole array to that value.
+            elif isinstance(J, numbers.Number):
+                self.J = theano.shared(
+                    value=np.ones(self.num_interactions) * J,
+                    name='J',
+                    borrow=True
+                )
+            # `J` can also be a dictionary, to explicitly insert initial
+            # conditions on the parameters.
+            elif isinstance(J, dict):
+                if net_topology is None:
+                    J_ = np.zeros(self.num_interactions)
+                    for target, value in J.items():
+                        # if target[0] is a single-element tuple, make it
+                        # into the corresponding integer
+                        if not isinstance(target[0], int) and len(target[0]) == 1:
+                            target = (target[0][0], target[1])
+                        J_[self.interactions.index(target)] = value
+                    self.J = theano.shared(value=J_, name='J', borrow=True)
+                else:
+                    raise NotImplementedError('Haven\' done it yet!')
+            else:
+                # If a `net_topology` has been given, check consistency:
+                # the number of elements given for `J` must be equal to the
+                # number of distinct symbols in `net_topology`.
+                if net_topology is not None:
+                    num_symbols = len(set(s for s in net_topology.values()))
+                    if np.asarray(J).shape[0] != num_symbols:
+                        raise ValueError('The number of specified parameters is '
+                                        'not consistent with the value of `net'
+                                        '_topology`.')
 
-            self.J = theano.shared(
-                value=np.asarray(J),
-                name='J',
-                borrow=True
-            )
+                self.J = theano.shared(
+                    value=np.asarray(J),
+                    name='J',
+                    borrow=True
+                )
         self.initial_conditions = self.J.get_value()
 
 
@@ -240,10 +269,10 @@ class QubitNetwork:
         target, d = pair
         # if `d` indicates a self-interaction..
         if len(d) == 1:
+            # fix `target` if it is a single-element tuple/list
             if isinstance(target, (tuple, list)):
-                term[target[0]] = sigmas[chars2pair(d)[0]]
-            else:
-                term[target] = sigmas[chars2pair(d)[0]]
+                target = target[0]
+            term[target] = sigmas[chars2pair(d)[0]]
         # if `d` indicates a pairwise interaction..
         elif len(d) == 2:
             term[target[0]] = sigmas[chars2pair(d)[0]]
@@ -826,7 +855,10 @@ class QubitNetwork:
         # pylint: disable=C0103
         # this builds the Hamiltonian of the system (in big real matrix form),
         # already multiplied with the -1j factor and ready for exponentiation
-        H = self.build_H_factors()
+        if self.hamiltonian is not None:
+            H = self.hamiltonian.build_theano_graph()
+        else:
+            H = self.build_H_factors()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 

@@ -4,6 +4,8 @@ A collection of utility functions not yet categorized.
 from collections import OrderedDict
 import json
 import numpy as np
+import sympy
+
 import qutip
 
 
@@ -49,8 +51,7 @@ def complex2bigreal(arr):
     # check if object is a qutip object
     if isinstance(arr, qutip.Qobj):
         arr = arr.data.toarray()
-    arr = np.asarray(arr)
-    ndims = len(arr.shape)
+    arr = np.asarray(arr).astype(np.complex)
     # if `arr` is a vector (possibly of shape Nx1 or 1xN)
     if isvector(arr):
         outarr = _complex2bigreal_vector(arr)
