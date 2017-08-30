@@ -5,6 +5,10 @@ import numpy as np
 import sympy
 
 import qutip
+import theano
+import theano.tensor as T
+
+from .utils import complex2bigreal
 
 
 def pauli_product(*args):
@@ -51,8 +55,11 @@ class QubitNetworkHamiltonian:
     """
 
     def __init__(self, n_qubits=None, expr=None, parameters=None, topology=None):
+        # initialize class attributes
         self.matrices = None
         self.free_parameters = None
+        self.initial_values = None
+        self.J = None
         # extract lists of parameters and matrices to which each is to
         # be multiplied
         if expr is not None:
@@ -75,6 +82,33 @@ class QubitNetworkHamiltonian:
         for parameter in self.free_parameters:
             self.matrices.append(expr.diff(parameter))
 
+    def _get_bigreal_matrices(self):
+        """
+        Return the elements of `self.matrices` as big real matrices.
+        """
+        return [complex2bigreal(matrix).astype(np.float)
+                for matrix in self.matrices]
+
+    def build_theano_graph(self):
+        """Return a theano object corresponding to the Hamiltonian.
+
+        The free parameters in the output graphs are taken from the sympy
+        free symbols in the Hamiltonian, stored in `self.free_parameters`.
+
+        """
+        if self.initial_values is None:
+            self.set_initial_values()
+        # define the theano variables
+        self.J = theano.shared(
+            value=self.initial_values,
+            name='J',
+            borrow=True  # still not sure what this does
+        )
+        # multiply variables with matrix coefficients
+        bigreal_matrices = self._get_bigreal_matrices()
+        theano_graph = T.tensordot(self.J, bigreal_matrices, axes=1)
+        return theano_graph
+
     def get_matrix(self):
         """Return the Hamiltonian matrix as a sympy matrix object."""
         # final_matrix = sympy.MatrixSymbol('H', *self.matrices[0].shape)
@@ -82,3 +116,14 @@ class QubitNetworkHamiltonian:
         for matrix, parameter in zip(self.matrices, self.free_parameters):
             final_matrix += parameter * matrix
         return final_matrix
+
+    def set_initial_values(self, values=None):
+        """Set initial values for the parameters in the Hamiltonian.
+
+        If no explicit values are given, the parameters are initialized
+        with zeros.
+        """
+        if values is None:
+            self.initial_values = np.zeros(len(self.free_parameters))
+        else:
+            raise NotImplementedError('Not implemented.')

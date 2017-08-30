@@ -9,6 +9,8 @@ from numpy.testing import assert_array_equal
 import sympy
 
 import qutip
+import theano
+import theano.tensor as T
 
 
 class TestPauliProduct(unittest.TestCase):
@@ -36,6 +38,27 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
                                         [0, 0, 1.0*b, 1.0*a],
                                         [1.0*a, 1.0*b, 0, 0],
                                         [1.0*b, 1.0*a, 0, 0]]))
+        )
+
+    def test_theano_graph(self):
+        a, b = sympy.symbols('a, b')
+        x1 = pauli_product(1, 0)
+        xx = pauli_product(1, 1)
+        expr = a * x1 + b * xx
+        hamiltonian = QubitNetworkHamiltonian(expr=expr)
+        graph = hamiltonian.build_theano_graph()
+        f = theano.function([], graph)
+        hamiltonian.J.set_value([1, 1])
+        assert_array_equal(
+            f(),
+            np.array([[ 0.,  0.,  1.,  1.,  0.,  0.,  0.,  0.],
+                      [ 0.,  0.,  1.,  1.,  0.,  0.,  0.,  0.],
+                      [ 1.,  1.,  0.,  0.,  0.,  0.,  0.,  0.],
+                      [ 1.,  1.,  0.,  0.,  0.,  0.,  0.,  0.],
+                      [ 0.,  0.,  0.,  0.,  0.,  0.,  1.,  1.],
+                      [ 0.,  0.,  0.,  0.,  0.,  0.,  1.,  1.],
+                      [ 0.,  0.,  0.,  0.,  1.,  1.,  0.,  0.],
+                      [ 0.,  0.,  0.,  0.,  1.,  1.,  0.,  0.]])
         )
 
 
