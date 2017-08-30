@@ -18,6 +18,7 @@ import theano.tensor as T
 
 # package imports
 from .QubitNetwork import QubitNetwork
+from .net_analysis_tools import load_network_from_file
 
 
 def transfer_J_values(source_net, target_net):
@@ -248,6 +249,7 @@ def sgd_optimization(
         # compile the training function `train_model`, that while computing
         # the cost at every iteration (batch), also updates the weights of
         # the network based on the rules defined in `updates`.
+        from IPython.core.debugger import set_trace; set_trace()
         train_model = theano.function(
             inputs=[index],
             outputs=cost,

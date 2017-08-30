@@ -31,75 +31,42 @@ from ._QubitNetwork import (_compute_fidelities,
                             _find_suitable_name)
 from .hamiltonian import QubitNetworkHamiltonian
 
+from IPython.core.debugger import set_trace
 
-class QubitNetwork:
+
+class QubitNetwork(QubitNetworkHamiltonian):
     """
     Main object representing the qubit network.
     """
-    def __init__(self, num_qubits, system_qubits=None,
-                 interactions='all',
+    def __init__(self,
+                 num_qubits=None,
+                 num_system_qubits=None,
+                 interactions=None,
                  ancillae_state=None,
                  target_gate=None,
                  net_topology=None,
                  sympy_expr=None,
                  J=None):
         # parameters initialization
-        self.num_qubits = None
         self.system_qubits = None
         self.target_gate = None
         self.num_ancillae = None
         self.num_system_qubits = None
-        self.pairs = None
-        self.net_topology = None
-        self.interactions = None
         self.ancillae_state = None
-        self.J = None
-        self.initial_conditions = None
-        self.hamiltonian = None  # for now only used with `sympy_expr`
-
-        # `self.num_qubits` is the TOTAL number of qubits in the
-        # network, regardless of them being system or ancilla qubits
-        self.num_qubits = num_qubits
-        # Define which qubits belong to the system. The others are all
-        # assumed to be ancilla qubits. If `system_qubits` was not
-        # explicitly given it is assumed that half of the qubits are the
-        # system and half are ancillae
-        if system_qubits is None:
-            self.system_qubits = tuple(range(num_qubits // 2))
-        elif (isinstance(system_qubits, list) and
-              all(qb < num_qubits for qb in system_qubits)):
-            self.system_qubits = tuple(system_qubits)
-        elif isinstance(system_qubits, int) and system_qubits <= num_qubits:
-            self.system_qubits = tuple(range(system_qubits))
-        else:
-            raise ValueError('Invalid value for system_qubits.')
-
+        # initialize QubitNetworkHamiltonian parent
+        super().__init__(num_qubits=num_qubits,
+                         num_system_qubits=num_system_qubits,
+                         expr=sympy_expr,
+                         interactions=interactions,
+                         net_topology=net_topology)
         # `self.target_gate` is given a value when the net is being
         # trained, for example by `sgd_optimization`. It is used simply
         # to keep track of what the network was trained to reproduce.
         self.target_gate = target_gate
 
-        # it will still be useful in the following to have direct access
-        # to the number of ancilla and system qubits
-        self.num_ancillae = self.num_qubits - len(self.system_qubits)
-        self.num_system_qubits = len(self.system_qubits)
-
-        # we store all the possible pairs for convenience
-        self.pairs = list(itertools.combinations(range(self.num_qubits), 2))
-
         self.net_topology = net_topology
         if net_topology is not None:
             self.net_topology_symbols = sorted(set(self.net_topology.values()))
-
-        # `parse_interactions` fills the `self.interactions`,
-        # `self.num_interactions` and `self.num_self_interactions`
-        # variables. Note that if `net_topology` is not None, then the
-        # the value of `interactions` is not actually used to fill
-        # `self.interactions`.
-        # NOTE: If the hamiltonian is given through the `sympy_expr`
-        #       parameter, the `self.interactions` attribute does not
-        #       make much sense in general and is not even set
-        self.parse_interactions(interactions)
 
         # Build the initial state of the ancillae, if there are any
         if self.num_ancillae > 0:
@@ -116,7 +83,6 @@ class QubitNetwork:
         #       be implemented through `QubitNetworkHamiltonian`.
         if sympy_expr is not None:
             self.hamiltonian = QubitNetworkHamiltonian(expr=sympy_expr)
-            self.J = self.hamiltonian.J
         else:
             # If no value of `J` has been given, then `self.J` is initialised
             # with random values. The length of the array is chosen using
@@ -177,108 +143,7 @@ class QubitNetwork:
                     name='J',
                     borrow=True
                 )
-        self.initial_conditions = self.J.get_value()
-
-
-    def parse_interactions(self, interactions):
-        """Sets the value of `self.interactions`. Returns None.
-
-        The input-given value of `interactions` is parsed, and the value
-        of `self.interactions` is accordingly set to describe the whole
-        set of (self-)interactions in the network.
-
-        Parameters
-        ----------
-        interactions: used to specify the active interactions.
-            - 'all': all possible pairwise interactions are active.
-            - ('all', directions): for each pair of qubits the active
-                interactions are all and only those specified in `directions`.
-            - {pair1: dir1, pair2: dir2, ...}: explicitly specify all the
-                active interactions.
-
-        Returns
-        -------
-        None
-        """
-        outints = []
-
-        if self.net_topology is not None:
-            # the expected form of `self.net_topology` is a dictionary like
-            # the following:
-            # {
-            #   ((1, 2), 'xx'): 'a',
-            #   ((1, 3), 'xx'): 'a',
-            #   ((2, 3), 'xx'): 'a',
-            #   ((1, 2), 'xy'): 'b',
-            # }
-
-            outints = list(self.net_topology.keys())
-
-            # not clear if it even makes sense to use `s elf.interactions`
-            # if a `net_topology` has been given..
-            self.interactions = outints
-            self.num_interactions = len(set(self.net_topology.values()))
-            return
-
-        elif interactions == 'all':
-            # create all self-interaction terms
-            for qubit in range(self.num_qubits):
-                for s in ['x', 'y', 'z']:
-                    outints.append((qubit, s))
-            # create all interactions terms
-            for pair in self.pairs:
-                for s1 in ['x', 'y', 'z']:
-                    for s2 in ['x', 'y', 'z']:
-                        outints.append((pair, s1 + s2))
-
-        elif isinstance(interactions, tuple):
-            if interactions[0] == 'all':
-                # here we need to first iterate over the interaction
-                # types because they can be either self or pairwise
-                # interactions, and depending on this they must be
-                # associated to single or pairs of qubits, respectively.
-                for d in interactions[1]:
-                    if len(d) == 1:
-                        for qubit in range(self.num_qubits):
-                            outints.append((qubit, d))
-                    elif len(d) == 2:
-                        for pair in self.pairs:
-                            outints.append((pair, d))
-        elif isinstance(interactions, list):
-            outints = interactions
-        else:
-            raise ValueError(
-                'Invalid value given for interactions.',
-                interactions)
-
-        num_self_interactions = 0
-        for q, d in outints:
-            if len(d) == 1:
-                num_self_interactions += 1
-
-        self.interactions = outints
-        self.num_interactions = len(outints)
-        self.num_self_interactions = num_self_interactions
-
-    def build_H_factor(self, pair):
-        term = [qutip.qeye(2) for _ in range(self.num_qubits)]
-
-        sigmas = [qutip.qeye(2),
-                  qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
-
-        target, d = pair
-        # if `d` indicates a self-interaction..
-        if len(d) == 1:
-            # fix `target` if it is a single-element tuple/list
-            if isinstance(target, (tuple, list)):
-                target = target[0]
-            term[target] = sigmas[chars2pair(d)[0]]
-        # if `d` indicates a pairwise interaction..
-        elif len(d) == 2:
-            term[target[0]] = sigmas[chars2pair(d)[0]]
-            term[target[1]] = sigmas[chars2pair(d)[1]]
-
-        return complex2bigreal(-1j * qutip.tensor(term).data.toarray())
+            self.initial_conditions = self.J.get_value()
 
     def build_H_factors(self, symbolic_result=True, J=None):
         if J is None:
@@ -306,20 +171,7 @@ class QubitNetwork:
             else:
                 return np.tensordot(_J, factors, axes=1)
         else:
-            # the expected form of `self.net_topology` is a dictionary like
-            # the following:
-            # {
-            #   ((1, 2), 'xx'): 'a',
-            #   ((1, 3), 'xx'): 'a',
-            #   ((2, 3), 'xx'): 'a',
-            #   ((1, 2), 'xy'): 'b',
-            # }
-
-            # symbols = []
-            # for symb in self.net_topology.values():
-            #     if symb not in symbols:
-            #         symbols.append(str(symb))
-            # symbols.sort()
+            
             symbols = sorted(set(self.net_topology.values()))
 
             factors = np.zeros(
@@ -405,8 +257,10 @@ class QubitNetwork:
         # density matrices, instead of just kets like they would when the
         # target is a unitary gate.
         if not isinstance(target_gate, qutip.Qobj):
-            raise TypeError('`target_gate` should be a qutip object.')
-
+            # raise TypeError('`target_gate` should be a qutip object.')
+            target_gate = qutip.Qobj(
+                target_gate, dims=[[2] * self.num_system_qubits] * 2)
+        # set_trace()
         if target_gate.issuper:
             target_states = []
             for psi in training_states:
@@ -855,10 +709,14 @@ class QubitNetwork:
         # pylint: disable=C0103
         # this builds the Hamiltonian of the system (in big real matrix form),
         # already multiplied with the -1j factor and ready for exponentiation
-        if self.hamiltonian is not None:
-            H = self.hamiltonian.build_theano_graph()
-        else:
-            H = self.build_H_factors()
+        if self.hamiltonian is None:
+            raise ValueError('The hamiltonian was not initialized.')
+        # use free parameteres and matrix coefficients to build the
+        # computational graph, using `theano.tensor.tensordot`
+        H = self.hamiltonian.build_theano_graph()
+        # set the initial values from which to start the training
+        self.hamiltonian.set_initial_values(self.initial_conditions)
+        self.J = self.hamiltonian.J
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 
