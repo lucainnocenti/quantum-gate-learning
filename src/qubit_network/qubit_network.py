@@ -12,9 +12,6 @@ import os
 import numpy as np
 import pandas as pd
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 import qutip
 import theano
 import theano.tensor as T
@@ -155,7 +152,8 @@ def sgd_optimization(
         If True, at every epoch the difference between max and min
         fidelities is reported.
     """
-
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     # -------- OPTIONS PARSING --------
 
     # Parse the `net` parameter.
