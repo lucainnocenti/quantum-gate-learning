@@ -13,7 +13,28 @@ def complexrandn(dim1, dim2):
     return big_matrix[:, :, 0] + 1.j * big_matrix[:, :, 1]
 
 
-def complex2bigreal(matrix):
+def isvector(arr):
+    """Check if a numpy array is a vector-like object."""
+    # we are not using `arr.ndims` in case the input is a qutip object
+    ndims = len(arr.shape)
+    return (ndims == 1
+            or (ndims == 2 and (arr.shape[0] == 1 or arr.shape[1] == 1)))
+
+
+def _complex2bigreal_vector(vector):
+    """Convert a complex vector to big real notation."""
+    vector = vector.reshape((vector.shape[0], 1))
+    return np.concatenate((np.real(vector), np.imag(vector)), axis=0)
+
+
+def _complex2bigreal_matrix(matrix):
+    """Convert complex matrix to big real notation."""
+    first_row = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
+    second_row = np.concatenate((np.imag(matrix), np.real(matrix)), axis=1)
+    return np.concatenate((first_row, second_row), axis=0)
+
+
+def complex2bigreal(arr):
     """Takes converts from complex to "big real" representation.
 
     To avoid the problem of theano and similar libraries not properly
@@ -25,34 +46,39 @@ def complex2bigreal(matrix):
     The input argument can be either a qutip object representing a ket,
     or a qutip object representing an operator (a density matrix).
     """
-
-    # if `matrix` is actually a qutip ket...
-    if isinstance(matrix, qutip.Qobj) and matrix.shape[1] == 1:
-        matrix = matrix.data.toarray()
-        matrix = np.concatenate((np.real(matrix), np.imag(matrix)), axis=0)
-        return matrix.reshape(matrix.shape[0])
-
-    # else, we assume the input to represent a density matrix. It can be
-    # both a 2d numpy array, or a 2d qutip object.
+    # check if object is a qutip object
+    if isinstance(arr, qutip.Qobj):
+        arr = arr.data.toarray()
+    arr = np.asarray(arr)
+    ndims = len(arr.shape)
+    # if `arr` is a vector (possibly of shape Nx1 or 1xN)
+    if isvector(arr):
+        outarr = _complex2bigreal_vector(arr)
     else:
-        if isinstance(matrix, qutip.Qobj):
-            matrix = matrix.data.toarray()
-        else:
-            matrix = np.asarray(matrix)
-        row1 = np.concatenate((np.real(matrix), -np.imag(matrix)), axis=1)
-        row2 = np.concatenate((np.imag(matrix), np.real(matrix)), axis=1)
-        return np.concatenate((row1, row2), axis=0)
+        outarr = _complex2bigreal_matrix(arr)
+    return outarr
 
 
-def bigreal2complex(matrix):
-    matrix = np.asarray(matrix)
-    if len(matrix.shape) == 2 and matrix.shape[0] == matrix.shape[1]:
-        real_part = matrix[:matrix.shape[0] // 2, :matrix.shape[1] // 2]
-        imag_part = matrix[matrix.shape[0] // 2:, :matrix.shape[1] // 2]
+def bigreal2complex(arr):
+    """Convert a numpy array object back into regular complex form.
+
+    NOTE: The output will always be a numpy.ndarray of complex dtype
+    """
+    arr = np.asarray(arr)
+    if isvector(arr):
+        # `arr` may be a Nx1 or 1xN dimensional vector, or a flat vector
+        try:
+            arr_len = arr.shape[0] * arr.shape[1]
+        except IndexError:
+            arr_len = len(arr)
+        # make `arr` an Nx1 vector
+        arr = arr.reshape((arr_len, 1))
+        real_part = arr[:arr.shape[0] // 2]
+        imag_part = arr[arr.shape[0] // 2:]
         return real_part + 1j * imag_part
-    elif len(matrix.shape) == 1:
-        real_part = matrix[:matrix.shape[0] // 2]
-        imag_part = matrix[matrix.shape[0] // 2:]
+    else:
+        real_part = arr[:arr.shape[0] // 2, :arr.shape[1] // 2]
+        imag_part = arr[arr.shape[0] // 2:, :arr.shape[1] // 2]
         return real_part + 1j * imag_part
 
 
@@ -162,7 +188,6 @@ def detensorize(bigm):
     return out
 
 
-
 def chop(arr, eps=1e-5):
     if isinstance(arr, qutip.Qobj):
         _arr = arr.data.toarray()
@@ -190,10 +215,12 @@ def print_OrderedDict(od):
 
 def custom_dataframe_sort(key=None, reverse=False, cmp=None):
     """Make a custom sorter for pandas dataframes."""
+
     def sorter(df):
         columns = list(df)
         return [
             columns.index(col)
             for col in sorted(columns, key=key, reverse=reverse)
         ]
+
     return sorter
