@@ -31,15 +31,16 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
     
     def test_parse_from_sympy_and_compile(self):
         sympy.init_printing(pretty_print=True)
-        J = np.asarray(sympy.symbols('J0:4:4')).reshape((4, 4))
-        hamiltonian_model = (pauli_product(0, 0) * J[0, 0] +
-                             pauli_product(1, 1) * J[1, 1])
+        J_pars = np.asarray(sympy.symbols('J0:4:4')).reshape((4, 4))
+        hamiltonian_model = (pauli_product(0, 0) * J_pars[0, 0] +
+                             pauli_product(1, 1) * J_pars[1, 1])
         net = QubitNetwork(num_qubits=2, sympy_expr=hamiltonian_model)
-        ham_matrix = theano.function([], net.build_theano_graph())
-        assert_array_equal(ham_matrix(), np.zeros((8, 8)))
-        net.J.set_value([1, 1])
+        J, hamiltonian_graph = net.build_theano_graph()
+        compute_hamiltonian = theano.function([], hamiltonian_graph)
+        assert_array_equal(compute_hamiltonian(), np.zeros((8, 8)))
+        J.set_value([1, 1])
         assert_array_equal(
-            ham_matrix()[4:, :4],
+            compute_hamiltonian()[4:, :4],
             np.array([[-1.,  0.,  0., -1.],
                       [ 0., -1., -1.,  0.],
                       [ 0., -1., -1.,  0.],

@@ -94,8 +94,7 @@ class QubitNetworkHamiltonian:
                  num_qubits=None,
                  expr=None,
                  interactions=None,
-                 net_topology=None,
-                 ancillae_states=None):
+                 net_topology=None):
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
         self.matrices = None  # matrix coefficients for free parameters
@@ -103,8 +102,6 @@ class QubitNetworkHamiltonian:
         self.interactions = None  # list of active interactions, if meaningful
         self.net_topology = None
         self.initial_values = None  # values from which training starts
-        self.J = None  # stores parameters in theano graph
-        self.ancillae_states = None  # initial values for ancillae (if any)
 
         # Extract lists of parameters and matrices to which each is to
         # be multiplied
@@ -227,7 +224,7 @@ class QubitNetworkHamiltonian:
             else:
                 target_tuples.append(tuple_)
         # Extract matrix coefficients for storing
-        # The i-th element of `self.J` will correspond to the
+        # The i-th element of `J` will correspond to the
         # interactions terms associated to the i-th symbol listed
         # in `symbols` (after sorting).
         self.matrices = []
@@ -239,32 +236,43 @@ class QubitNetworkHamiltonian:
                     factor += pauli_product(*tuple_)
             self.matrices.append(factor)
 
-    def _get_bigreal_matrices(self):
+    def _get_bigreal_matrices(self, multiply_by_j=True):
         """
         Multiply each element of `self.matrices` with `-1j`, and return
-        them converted to big real form.
+        them converted to big real form. Or optionally do not multiply
+        with the imaginary unit and just return the matrix coefficients
+        converted in big real form.
         """
-        return [complex2bigreal(-1j * matrix).astype(np.float)
-                for matrix in self.matrices]
+        if multiply_by_j:
+            return [complex2bigreal(-1j * matrix).astype(np.float)
+                    for matrix in self.matrices]
+        else:
+            return [complex2bigreal(matrix).astype(np.float)
+                    for matrix in self.matrices]
 
     def build_theano_graph(self):
-        """Return a theano object corresponding to the Hamiltonian.
+        """Build theano object corresponding to the Hamiltonian model.
 
         The free parameters in the output graphs are taken from the sympy
         free symbols in the Hamiltonian, stored in `self.free_parameters`.
 
+        Returns
+        -------
+        tuple with the shared theano variable representing the parameters
+        and the corresponding theano.tensor object for the Hamiltonian
+        model.
         """
         # define the theano variables
-        self.J = theano.shared(
+        parameters = theano.shared(
             value=np.zeros(len(self.free_parameters), dtype=np.float),
             name='J',
             borrow=True  # still not sure what this does
         )
         # multiply variables with matrix coefficients
         bigreal_matrices = self._get_bigreal_matrices()
-        theano_graph = T.tensordot(self.J, bigreal_matrices, axes=1)
+        theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
         # from IPython.core.debugger import set_trace; set_trace()
-        return theano_graph
+        return [parameters, theano_graph]
 
     def get_matrix(self):
         """Return the Hamiltonian matrix as a sympy matrix object."""

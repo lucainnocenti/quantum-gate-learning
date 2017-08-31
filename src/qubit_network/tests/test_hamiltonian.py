@@ -130,11 +130,11 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
         xx = pauli_product(1, 1)
         expr = a * x1 + b * xx
         hamiltonian = QubitNetworkHamiltonian(expr=expr)
-        graph = hamiltonian.build_theano_graph()
-        f = theano.function([], graph)
-        hamiltonian.J.set_value([1, 1])
+        J, theano_hamiltonian = hamiltonian.build_theano_graph()
+        compute_hamiltonian = theano.function([], theano_hamiltonian)
+        J.set_value([1, 1])
         assert_array_equal(
-            f(),
+            compute_hamiltonian(),
             np.array([[ 0.,  0.,  0.,  0.,  0.,  0.,  1.,  1.],
                       [ 0.,  0.,  0.,  0.,  0.,  0.,  1.,  1.],
                       [ 0.,  0.,  0.,  0.,  1.,  1.,  0.,  0.],
