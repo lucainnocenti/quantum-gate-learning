@@ -12,11 +12,6 @@ import scipy.linalg
 import numpy as np
 import pandas as pd
 
-import matplotlib.pyplot as plt
-import plotly.plotly as py
-import plotly.offline
-import cufflinks
-
 import theano
 import theano.tensor as T
 import theano.tensor.slinalg  # for expm()
@@ -46,162 +41,49 @@ class QubitNetwork(QubitNetworkHamiltonian):
                  target_gate=None,
                  net_topology=None,
                  sympy_expr=None,
-                 J=None):
+                 initial_values=None):
         # parameters initialization
         self.system_qubits = None
         self.target_gate = None
         self.num_ancillae = None
         self.num_system_qubits = None
         self.ancillae_state = None
-        # initialize QubitNetworkHamiltonian parent
+        # Initialize QubitNetworkHamiltonian parent. This does two things:
+        # 1. Computes `self.matrices` and `self.free_parameters`, to be
+        #    later used to build the full Hamiltonian matrix (and thus
+        #    the computational graph for the training).
+        # 2. Actually, just the thing above.
         super().__init__(num_qubits=num_qubits,
-                         num_system_qubits=num_system_qubits,
                          expr=sympy_expr,
                          interactions=interactions,
                          net_topology=net_topology)
+        # Initialize values of parameter in graph. This is stored in the
+        # attribute `self.J` inherited from `QubitNetworkHamiltonian`,
+        # which is shared theano tensor.
+        self.set_initial_values(initial_values)
         # `self.target_gate` is given a value when the net is being
         # trained, for example by `sgd_optimization`. It is used simply
         # to keep track of what the network was trained to reproduce.
+        # If no explicit value for `target_gate` is given, it is set
+        # during the training.
         self.target_gate = target_gate
-
-        self.net_topology = net_topology
-        if net_topology is not None:
-            self.net_topology_symbols = sorted(set(self.net_topology.values()))
-
         # Build the initial state of the ancillae, if there are any
-        if self.num_ancillae > 0:
-            if ancillae_state is None:
-                self.ancillae_state = self.build_ancilla_state()
-            else:
-                self.ancillae_state = ancillae_state
-        else:
-            self.ancillae_state = None
+        if num_system_qubits is not None and num_system_qubits < num_qubits:
+            self._initialize_ancillae(ancillae_state)
+        # if self.num_ancillae > 0:
+        #     if ancillae_state is None:
+        #         self.ancillae_state = self.build_ancilla_state()
+        #     else:
+        #         self.ancillae_state = ancillae_state
+        # else:
+        #     self.ancillae_state = None
 
-        # NOTE: This is to be fixed. For now the old system to fill in
-        #       the `self.J` attribute is used if no `sympy_expr` argument
-        #       has been given. In the future also the old method should
-        #       be implemented through `QubitNetworkHamiltonian`.
-        if sympy_expr is not None:
-            self.hamiltonian = QubitNetworkHamiltonian(expr=sympy_expr)
-        else:
-            # If no value of `J` has been given, then `self.J` is initialised
-            # with random values. The length of the array is chosen using
-            # the value of `self.num_interactions`, or `net_topology` if given.
-            if J is None:
-                if net_topology is None:
-                    self.J = theano.shared(
-                        value=np.random.randn(self.num_interactions),
-                        name='J',
-                        borrow=True
-                    )
-                else:
-                    num_symbols = len(set(net_topology.values()))
-                    self.J = theano.shared(
-                        value=np.random.randn(num_symbols),
-                        name='J',
-                        borrow=True
-                    )
-            # If a value for `J` has been given during the initialisation of
-            # the `QubitNetwork` instance, then that value is directly stored
-            # into `self.J`. If also  a `net_topology` has been given, a
-            # consistency check is performed.
-            # If this value is simply a number, it is used to initialize the
-            # whole array to that value.
-            elif isinstance(J, numbers.Number):
-                self.J = theano.shared(
-                    value=np.ones(self.num_interactions) * J,
-                    name='J',
-                    borrow=True
-                )
-            # `J` can also be a dictionary, to explicitly insert initial
-            # conditions on the parameters.
-            elif isinstance(J, dict):
-                if net_topology is None:
-                    J_ = np.zeros(self.num_interactions)
-                    for target, value in J.items():
-                        # if target[0] is a single-element tuple, make it
-                        # into the corresponding integer
-                        if not isinstance(target[0], int) and len(target[0]) == 1:
-                            target = (target[0][0], target[1])
-                        J_[self.interactions.index(target)] = value
-                    self.J = theano.shared(value=J_, name='J', borrow=True)
-                else:
-                    raise NotImplementedError('Haven\' done it yet!')
-            else:
-                # If a `net_topology` has been given, check consistency:
-                # the number of elements given for `J` must be equal to the
-                # number of distinct symbols in `net_topology`.
-                if net_topology is not None:
-                    num_symbols = len(set(s for s in net_topology.values()))
-                    if np.asarray(J).shape[0] != num_symbols:
-                        raise ValueError('The number of specified parameters is '
-                                        'not consistent with the value of `net'
-                                        '_topology`.')
-
-                self.J = theano.shared(
-                    value=np.asarray(J),
-                    name='J',
-                    borrow=True
-                )
-            self.initial_conditions = self.J.get_value()
-
-    def build_H_factors(self, symbolic_result=True, J=None):
-        if J is None:
-            if symbolic_result:
-                _J = self.J
-            else:
-                _J = self.J.get_value()
-        else:
-            _J = J
-
-        dim_real_space = 2 * 2 ** self.num_qubits
-        if self.net_topology is None:
-
-            factors = np.zeros(
-                (self.num_interactions, dim_real_space, dim_real_space),
-                dtype=np.float64
-            )
-            for idx, pair in enumerate(self.interactions):
-                factors[idx] = self.build_H_factor(pair)
-
-            if symbolic_result:
-                # return the dot product between `self.J` and `factors`,
-                # amounting to the sum over `i` of `self.J[i] * factors[i]`
-                return T.tensordot(_J, factors, axes=1)
-            else:
-                return np.tensordot(_J, factors, axes=1)
-        else:
-            
-            symbols = sorted(set(self.net_topology.values()))
-
-            factors = np.zeros(
-                (self.num_interactions, dim_real_space, dim_real_space),
-                dtype=np.float64
-            )
-
-            # The number of elements in `symbols` should be equal to
-            # `self.num_interactions`, computed by `parse_interactions`.
-            # Note that is the code below that determines to what
-            # interaction does the i-th element of `self.J` correspond
-            # to.
-            # The i-th element of `self.J` will correspond to the
-            # interactions terms associated to the i-th symbol listed
-            # in `symbols` (after sorting).
-            for idx, symb in enumerate(symbols):
-                for pair, label in self.net_topology.items():
-                    if str(label) == str(symb):
-                        factors[idx] += self.build_H_factor(pair)
-
-            if symbolic_result:
-                return T.tensordot(_J, factors, axes=1)
-            else:
-                return np.tensordot(_J, factors, axes=1)
-
-    def build_ancilla_state(self):
+    def _initialize_ancillae(self, ancillae_state):
         """Returns an initial ancilla state, as a qutip.Qobj object.
 
         The generated state has every ancillary qubit in the up state.
         """
+        raise NotImplementedError('To be done.')
         state = qutip.tensor([qutip.basis(2, 0)
                               for _ in range(self.num_ancillae)])
         return state
@@ -807,6 +689,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
                             overlay_hlines=None,
                             asFigure=False, **kwargs):
         """Plot the current values of the parameters of the network."""
+        import cufflinks
         df = self.net_parameters_to_dataframe()
         # optionally sort the index, grouping together self-interactions
         if sort_index:

@@ -2,6 +2,7 @@
 Compute the Hamiltonian of the system.
 """
 import itertools
+import numbers
 import numpy as np
 import sympy
 
@@ -77,46 +78,45 @@ class QubitNetworkHamiltonian:
     on the arguments given.
     Parameters
     ----------
-    n_qubits : int,
+    num_qubits : int,
         Number of qubits in the network.
     parameters : string, tuple or list, optional
         If given, it is used to use the parameters in some predefined
         way. Possible values are:
         - 'all': use all 1- and 2-qubit interactions, each one with a
-                 different parameter assigned.
+            different parameter assigned.
+        - ('all', (...)): use the specified types of intereactions for
+            all qubits.
+        - list of interactions: use all and only the given interactions.
     """
 
     def __init__(self,
                  num_qubits=None,
-                 num_system_qubits=None,
                  expr=None,
                  interactions=None,
-                 net_topology=None):
+                 net_topology=None,
+                 ancillae_states=None):
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
-        self.num_system_qubits = None  # number of nonancillary qubits
         self.matrices = None  # matrix coefficients for free parameters
         self.free_parameters = None  # parameters to be trained
         self.interactions = None  # list of active interactions, if meaningful
         self.net_topology = None
         self.initial_values = None  # values from which training starts
-        self.J = None
+        self.J = None  # stores parameters in theano graph
+        self.ancillae_states = None  # initial values for ancillae (if any)
+
         # Extract lists of parameters and matrices to which each is to
         # be multiplied
-        # `num_system_qubits` is the number of nonancillary qubits, if
-        # this is 0 (or not given), the training happens over the whole
-        # qubit network (with unitary target)
-        if num_system_qubits is None or num_system_qubits == 0:
-            if expr is not None:
-                self._parse_sympy_expr(expr)
-            elif interactions is not None:
-                self._parse_from_interactions(num_qubits, interactions)
-            elif net_topology is not None:
-                self._parse_from_topology(num_qubits, net_topology)
-            else:
-                raise NotImplementedError('To be implemented')
+        if expr is not None:
+            self._parse_sympy_expr(expr)
+        elif interactions is not None:
+            self._parse_from_interactions(num_qubits, interactions)
+        elif net_topology is not None:
+            self._parse_from_topology(num_qubits, net_topology)
         else:
-            raise NotImplementedError('No system qubits for now.')
+            raise ValueError('One of `expr`, `interactions` or '
+                             '`net_topology` must be given.')
 
     def _parse_sympy_expr(self, expr):
         """
@@ -281,7 +281,39 @@ class QubitNetworkHamiltonian:
         with zeros.
         """
         if values is None:
-            self.initial_values = np.zeros(len(self.free_parameters))
+            self.initial_values = np.random.randn(len(self.free_parameters))
+        elif isinstance(values, numbers.Number):
+            self.initial_values = np.ones(len(self.free_parameters)) * values
+        # A dictionary can be used to directly set the values of some of
+        # the parameters. Each key of the dictionary can be either a
+        # 1) sympy symbol correponding to an interaction, 2) a string
+        # with the same name of a symbol of an interaction or 3) a tuple
+        # of integers corresponding to a given interactions. This last
+        # option is not valid if the Hamiltonian was created using a
+        # sympy expression.
+        # All the symbols not specified in the dictionary are initialized
+        # to zero.
+        elif isinstance(values, dict):
+            init_values = np.zeros(len(self.free_parameters))
+            symbols_dict = dict(zip(
+                self.free_parameters, range(len(self.free_parameters))))
+            for symb, value in values.items():
+                # if `symb` is a single number, make a 1-element tuple
+                if isinstance(symb, numbers.Number):
+                    symb = (symb,)
+                # convert strings to corresponding sympy symbols
+                if isinstance(symb, str):
+                    symb = sympy.Symbol(symb)
+                # `symb` can be a tuple when a key is of the form
+                # `(1, 3)` to indicate an X1Z2 interaction.
+                elif isinstance(symb, tuple):
+                    symb = 'J' + ''.join(str(char) for char in symb)
+                try:
+                    init_values[symbols_dict[symb]] = value
+                except KeyError:
+                    raise ValueError('The symbol {} doesn\'t match'
+                                     ' any of the names of parameters of '
+                                     'the model.'.format(str(symb)))
+            self.initial_values(init_values)
         else:
             raise NotImplementedError('Not implemented.')
-        self.J.set_value(self.initial_values)
