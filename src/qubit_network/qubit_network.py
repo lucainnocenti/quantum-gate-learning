@@ -45,47 +45,6 @@ def transfer_J_values(source_net, target_net):
     target_net.J.set_value(target_J)
 
 
-def _gradient_updates_momentum(params, grad, learning_rate, momentum):
-    '''
-    Compute updates for gradient descent with momentum
-
-    :parameters:
-        - cost : theano.tensor.var.TensorVariable
-            Theano cost function to minimize
-        - params : list of theano.tensor.var.TensorVariable
-            Parameters to compute gradient against
-        - learning_rate : float
-            Gradient descent learning rate
-        - momentum : float
-            Momentum parameter, should be at least 0 (standard gradient
-            descent) and less than 1
-
-    :returns:
-        updates : list
-            List of updates, one for each parameter
-    '''
-    # Make sure momentum is a sane value
-    assert momentum < 1 and momentum >= 0
-    # List of update steps for each parameter
-    updates = []
-    if not isinstance(params, list):
-        params = [params]
-    # Just gradient descent on cost
-    for param in params:
-        # For each parameter, we'll create a previous_step shared variable.
-        # This variable keeps track of the parameter's update step
-        # across iterations. We initialize it to 0
-        previous_step = theano.shared(
-            param.get_value() * 0., broadcastable=param.broadcastable)
-        step = momentum * previous_step + learning_rate * grad
-        # Add an update to store the previous step value
-        updates.append((previous_step, step))
-        # Add an update to apply the gradient descent step to the
-        # parameter itself
-        updates.append((param, param + step))
-    return updates
-
-
 def sgd_optimization(
         net=None,
         learning_rate=0.13,
@@ -162,7 +121,7 @@ def sgd_optimization(
     # `_net` is the variable used in the function (usually derived from `net`)
     _net = None
     if net is None:
-        _net = QubitNetwork(num_qubits=4, system_qubits=3, interactions='all')
+        _net = QubitNetwork(num_qubits=4, num_system_qubits=3, interactions='all')
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         _net = load_network_from_file(net)
@@ -249,7 +208,7 @@ def sgd_optimization(
         # compile the training function `train_model`, that while computing
         # the cost at every iteration (batch), also updates the weights of
         # the network based on the rules defined in `updates`.
-        from IPython.core.debugger import set_trace; set_trace()
+        # from IPython.core.debugger import set_trace; set_trace()
         train_model = theano.function(
             inputs=[index],
             outputs=cost,

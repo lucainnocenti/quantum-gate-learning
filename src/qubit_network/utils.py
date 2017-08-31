@@ -37,7 +37,7 @@ def _complex2bigreal_matrix(matrix):
 
 
 def complex2bigreal(arr):
-    """Takes converts from complex to "big real" representation.
+    """Convert from complex to big real representation.
 
     To avoid the problem of theano and similar libraries not properly
     supporting the gradient of complex objects, we map every complex
@@ -48,7 +48,7 @@ def complex2bigreal(arr):
     The input argument can be either a qutip object representing a ket,
     or a qutip object representing an operator (a density matrix).
     """
-    # check if object is a qutip object
+    # if qutip object, extract numpy arrays from it
     if isinstance(arr, qutip.Qobj):
         arr = arr.data.toarray()
     arr = np.asarray(arr).astype(np.complex)
@@ -61,7 +61,7 @@ def complex2bigreal(arr):
 
 
 def bigreal2complex(arr):
-    """Convert a numpy array object back into regular complex form.
+    """Convert numpy array back into regular complex form.
 
     NOTE: The output will always be a numpy.ndarray of complex dtype
     """
