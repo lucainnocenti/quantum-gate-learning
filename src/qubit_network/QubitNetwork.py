@@ -26,7 +26,7 @@ from ._QubitNetwork import (_compute_fidelities,
                             _find_suitable_name)
 from .hamiltonian import QubitNetworkHamiltonian
 
-from IPython.core.debugger import set_trace
+# from IPython.core.debugger import set_trace
 
 
 class QubitNetwork(QubitNetworkHamiltonian):
@@ -45,9 +45,8 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # parameters initialization
         self.system_qubits = None
         self.target_gate = None
-        self.num_ancillae = None
         self.num_system_qubits = None
-        self.ancillae_state = None
+        self.ancillae_state = None  # initial values for ancillae (if any)
         # Initialize QubitNetworkHamiltonian parent. This does two things:
         # 1. Computes `self.matrices` and `self.free_parameters`, to be
         #    later used to build the full Hamiltonian matrix (and thus
@@ -68,7 +67,9 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # during the training.
         self.target_gate = target_gate
         # Build the initial state of the ancillae, if there are any
-        if num_system_qubits is not None and num_system_qubits < num_qubits:
+        if num_system_qubits is None:
+            self.num_system_qubits = self.num_qubits
+        if self.num_system_qubits < self.num_qubits:
             self._initialize_ancillae(ancillae_state)
         # if self.num_ancillae > 0:
         #     if ancillae_state is None:
@@ -77,6 +78,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
         #         self.ancillae_state = ancillae_state
         # else:
         #     self.ancillae_state = None
+        
 
     def _initialize_ancillae(self, ancillae_state):
         """Returns an initial ancilla state, as a qutip.Qobj object.
@@ -161,7 +163,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # in big real form
         tr_states_with_anc = []  # TRaining states with ANCillae
         for ket in training_states:
-            if self.num_ancillae > 0:
+            if self.num_system_qubits < self.num_qubits:
                 ket = qutip.tensor(ket, self.ancillae_state)
             tr_states_with_anc.append(complex2bigreal(ket))
         training_states = tr_states_with_anc
@@ -199,7 +201,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
                 'target_gate': self.target_gate,
                 'net_topology': self.net_topology,
                 'J': self.J.get_value(),
-                'initial_conditions': self.initial_conditions
+                'initial_values': self.initial_values
             }
             if not os.path.isabs(outfile):
                 outfile = os.path.join(os.getcwd(), outfile)
@@ -214,7 +216,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
             data['full_unitary.real'] = current_gate.real.tolist()
             data['full_unitary.imag'] = current_gate.imag.tolist()
 
-            if self.num_ancillae > 0:
+            if self.num_system_qubits  < self.num_qubits:
                 ancillae_state = self.ancillae_state.data.toarray()
                 data['ancillae_state.real'] = ancillae_state.real.tolist()
                 data['ancillae_state.imag'] = ancillae_state.imag.tolist()
@@ -251,7 +253,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
 
             data['interactions'] = self.interactions
             data['J'] = self.J.get_value().tolist()
-            data['initial_conditions'] = self.initial_conditions.tolist()
+            data['initial_values'] = self.initial_values.tolist()
 
             with open(outfile, 'w') as fp:
                 json.dump(data, fp, indent=4)
@@ -462,14 +464,14 @@ class QubitNetwork(QubitNetworkHamiltonian):
             psi_in.dims = [
                 [2] * self.num_system_qubits, [1] * self.num_system_qubits]
             # embed it into the bigger system+ancilla space (if necessary)
-            if self.num_ancillae > 0:
+            if self.num_system_qubits < self.num_qubits:
                 Psi_in = qutip.tensor(psi_in, self.ancillae_state)
             else:
                 Psi_in = psi_in
             # evolve input state
             Psi_out = gate * Psi_in
             # trace out ancilla (if there is an ancilla to trace)
-            if self.num_ancillae > 0:
+            if self.num_system_qubits < self.num_qubits:
                 dm_out = Psi_out.ptrace(range(self.num_system_qubits))
             else:
                 dm_out = qutip.ket2dm(Psi_out)
@@ -588,17 +590,11 @@ class QubitNetwork(QubitNetworkHamiltonian):
         -------
         A theano function, to be used for the MSGD algorithm
         """
-        # pylint: disable=C0103
-        # this builds the Hamiltonian of the system (in big real matrix form),
-        # already multiplied with the -1j factor and ready for exponentiation
-        if self.hamiltonian is None:
-            raise ValueError('The hamiltonian was not initialized.')
-        # use free parameteres and matrix coefficients to build the
-        # computational graph, using `theano.tensor.tensordot`
-        H = self.hamiltonian.build_theano_graph()
-        # set the initial values from which to start the training
-        self.hamiltonian.set_initial_values(self.initial_conditions)
-        self.J = self.hamiltonian.J
+        # Use free parameteres and matrix coefficients to build the
+        # computational graph, using `theano.tensor.tensordot`. The
+        # result is a theano.tensor version of the parametrized
+        # Hamiltonian model, multiplied by -1j, in big real form.
+        H = self.build_theano_graph()
         # expH is the unitary evolution of the system
         expH = T.slinalg.expm(H)
 
@@ -617,7 +613,8 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # computed projecting the evolution of every element of
         # `states` over the corresponding element of `target_states`,
         # and taking the squared modulus of this number.
-        if self.num_ancillae == 0:
+        num_ancillae = self.num_qubits - self.num_system_qubits
+        if num_ancillae == 0:
             fidelities, _ = theano.scan(
                 fn=_compute_fidelities_no_ptrace,
                 sequences=T.arange(expH_times_state.shape[0]),
@@ -627,8 +624,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
             fidelities, _ = theano.scan(
                 fn=_compute_fidelities,
                 sequences=T.arange(expH_times_state.shape[0]),
-                non_sequences=[expH_times_state, target_states,
-                               self.num_ancillae]
+                non_sequences=[expH_times_state, target_states, num_ancillae]
             )
 
         # the default behaviour is to return the mean computed fidelity,
