@@ -120,7 +120,7 @@ class QubitNetworkHamiltonian:
         Extract free parameters and matrix coefficients from sympy expr.
         """
         try:
-            self.free_parameters = expr.free_symbols
+            self.free_parameters = list(expr.free_symbols)
             _len = expr.shape[0]
         except TypeError:
             raise TypeError('`expr` must be a sympy MatrixSymbol object.')
@@ -196,7 +196,7 @@ class QubitNetworkHamiltonian:
         # ensure that all values are sympy symbols
         all_symbols = [sympy.Symbol(str(symb)) for symb in topology.values()]
         # take list of not equal symbols
-        symbols = set(all_symbols)
+        symbols = list(set(all_symbols))
         # we try to sort the symbols, but if they are sympy symbols this
         # will fail with a TypeError, in which case we just give up and
         # leave them in whatever order they come out of `set`
@@ -260,7 +260,7 @@ class QubitNetworkHamiltonian:
         -------
         tuple with the shared theano variable representing the parameters
         and the corresponding theano.tensor object for the Hamiltonian
-        model.
+        model, ***multiplied by -1j***.
         """
         # define the theano variables
         parameters = theano.shared(
