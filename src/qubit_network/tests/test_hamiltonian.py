@@ -124,7 +124,7 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
                 [1.0 * a,  1.0 * b, 1.0 * a, -1.0 * c]]))
 
 
-    def test_theano_graph(self):
+    def test_theano_graph_x1_xx(self):
         a, b = sympy.symbols('a, b')
         x1 = pauli_product(1, 0)
         xx = pauli_product(1, 1)
@@ -144,7 +144,36 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
                       [-1., -1.,  0.,  0.,  0.,  0.,  0.,  0.],
                       [-1., -1.,  0.,  0.,  0.,  0.,  0.,  0.]])
         )
-
+    
+    def test_theano_graph_1_xx(self):
+        J00, J11 = sympy.symbols('J00 J11')
+        expr = J00 * pauli_product(0, 0) + J11 * pauli_product(1, 1)
+        hamiltonian = QubitNetworkHamiltonian(expr=expr)
+        J00_index = hamiltonian.free_parameters.index(J00)
+        J11_index = hamiltonian.free_parameters.index(J11)
+        J, model = hamiltonian.build_theano_graph()
+        compute_hamiltonian = theano.function([], model)
+        # J starts with values 0
+        assert_array_equal(
+            compute_hamiltonian(),
+            np.zeros((8, 8))
+        )
+        # try with J00=1, J11=0
+        new_J = [0, 0]
+        new_J[J00_index] = 1
+        J.set_value(new_J)
+        assert_array_equal(
+            compute_hamiltonian(),
+            complex2bigreal(-1j * np.identity(4))
+        )
+        # try with J00=0, J11=1
+        new_J = [0, 0]
+        new_J[J11_index] = 1
+        J.set_value(new_J)
+        assert_array_equal(
+            compute_hamiltonian(),
+            complex2bigreal(-1j * np.asarray(pauli_product(1, 1)))
+        )
 
 if __name__ == '__main__':
     # change path to properly import qubit_network package when called
@@ -155,5 +184,5 @@ if __name__ == '__main__':
     sys.path.insert(1, PARENTDIR)
     from qubit_network.hamiltonian import (QubitNetworkHamiltonian,
                                            pauli_product)
-
+    from qubit_network.utils import complex2bigreal
     unittest.main()
