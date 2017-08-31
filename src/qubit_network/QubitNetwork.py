@@ -69,6 +69,8 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # Build the initial state of the ancillae, if there are any
         if num_system_qubits is None:
             self.num_system_qubits = self.num_qubits
+        else:
+            self.num_system_qubits = num_system_qubits
         if self.num_system_qubits < self.num_qubits:
             self._initialize_ancillae(ancillae_state)
         # if self.num_ancillae > 0:
