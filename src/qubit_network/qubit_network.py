@@ -19,6 +19,7 @@ import theano.tensor as T
 # package imports
 from .QubitNetwork import QubitNetwork
 from .net_analysis_tools import load_network_from_file
+from .model import FidelityGraph, _gradient_updates_momentum
 
 
 def transfer_J_values(source_net, target_net):
@@ -121,7 +122,7 @@ def sgd_optimization(
     # `_net` is the variable used in the function (usually derived from `net`)
     _net = None
     if net is None:
-        _net = QubitNetwork(num_qubits=4, num_system_qubits=3, interactions='all')
+        raise ValueError('The `net` parameter is mandatory.')
     elif isinstance(net, str):
         # assume `net` is the path where the network was stored
         _net = load_network_from_file(net)
@@ -158,19 +159,28 @@ def sgd_optimization(
 
     print('Generating training data...')
 
-    # `generate_training_data` outputs a pair, the first element of which
-    # is a list of states spanning the system qubits, while the second
-    # element is a list of states spanning only
-    dataset = _net.generate_training_data(target_gate, training_dataset_size)
-    states = theano.shared(np.asarray(dataset[0], dtype=theano.config.floatX))
-    target_states = theano.shared(
-        np.asarray(dataset[1], dtype=theano.config.floatX))
+    model = FidelityGraph(_net.num_qubits, _net.num_system_qubits,
+                          *_net.build_theano_graph(), _net.target_gate)
+    # initialize training data
+    def new_training_data():
+        return model.generate_training_states(training_dataset_size)
+    inputs, outputs = new_training_data()
+    inputs_holder = theano.shared(
+        np.asarray(inputs, dtype=theano.config.floatX))
+    outputs_holder = theano.shared(
+        np.asarray(outputs, dtype=theano.config.floatX))
+    # initialize test data
+    test_inputs, test_outputs = model.generate_training_states(test_dataset_size)
+    # dataset = _net.generate_training_data(target_gate, training_dataset_size)
+    # states = theano.shared(np.asarray(dataset[0], dtype=theano.config.floatX))
+    # target_states = theano.shared(
+    #     np.asarray(dataset[1], dtype=theano.config.floatX))
 
-    test_dataset = _net.generate_training_data(target_gate, test_dataset_size)
-    test_states = theano.shared(
-        np.asarray(test_dataset[0], dtype=theano.config.floatX))
-    test_target_states = theano.shared(
-        np.asarray(test_dataset[1], dtype=theano.config.floatX))
+    # test_dataset = _net.generate_training_data(target_gate, test_dataset_size)
+    # test_states = theano.shared(
+    #     np.asarray(test_dataset[0], dtype=theano.config.floatX))
+    # test_target_states = theano.shared(
+    #     np.asarray(test_dataset[1], dtype=theano.config.floatX))
 
     # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBSGD --------
 
@@ -178,9 +188,6 @@ def sgd_optimization(
 
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a minibatch
-    # generate symbolic variables for input data and labels
-    x = T.dmatrix('x')  # input state (data). Every row is a state vector
-    y = T.dmatrix('y')  # output target state (label). As above
 
     _learning_rate = theano.shared(
         np.asarray(learning_rate, dtype=theano.config.floatX),
@@ -188,19 +195,10 @@ def sgd_optimization(
 
     # Define the cost function, that is, the fidelity. This is the
     # number we ought to maximize through the training.
-    cost = _net.fidelity(x, y)
-    # all_fidelities = _net.fidelity(x, y, return_mean=True)
+    cost = model.fidelity()
 
     # compute the gradient of the cost
-    g_J = T.grad(cost=cost, wrt=_net.J)
-
-    # specify how to update the parameters of the model as a list of
-    # (variable, update expression) pairs
-    if SGD_method == 'momentum':
-        updates = _gradient_updates_momentum(_net.J, g_J, _learning_rate, 0.5)
-    else:
-        raise ValueError('SGD_method has an invalid value.')
-    # updates = [(_net.J, _net.J + _learning_rate * g_J)]
+    g_J = T.grad(cost=cost, wrt=model.parameters)
 
     # Theoretically it should be possible to reuse already compiled
     # computational graph, but I didn't really test this functionality yet.
@@ -209,13 +207,15 @@ def sgd_optimization(
         # the cost at every iteration (batch), also updates the weights of
         # the network based on the rules defined in `updates`.
         # from IPython.core.debugger import set_trace; set_trace()
+        batch_start = index * batch_size
+        batch_end = (index + 1) * batch_size
         train_model = theano.function(
             inputs=[index],
             outputs=cost,
             updates=updates,
             givens={
-                x: states[index * batch_size:(index + 1) * batch_size],
-                y: target_states[index * batch_size:(index + 1) * batch_size]
+                model.inputs: inputs_holder[batch_start: batch_end],
+                model.outputs: outputs_holder[batch_start: batch_end]
             })
 
         # `test_model` is used to test the fidelity given by the currently
@@ -226,15 +226,15 @@ def sgd_optimization(
             inputs=[],
             outputs=cost,
             updates=None,
-            givens={x: test_states,
-                    y: test_target_states})
+            givens={model.inputs: test_inputs,
+                    model.outputs: test_outputs})
     else:
         train_model, test_model = precompiled_functions
 
     # -------- DO THE ACTUAL MAXIMIZATION --------
 
     print('Let\'s roll!')
-    n_train_batches = states.get_value().shape[0] // batch_size
+    n_train_batches = training_dataset_size // batch_size
     # fids_history = np.array([])
     if truncate_fidelity_history is None:
         fids_history = []
@@ -305,10 +305,9 @@ def sgd_optimization(
                                      (1 + decay_rate * n_epoch))
 
             # generate a new set of training states
-            dataset = _net.generate_training_data(target_gate,
-                                                  training_dataset_size)
-            states.set_value(dataset[0])
-            target_states.set_value(dataset[1])
+            inputs, outputs = new_training_data()
+            inputs_holder.set_value(inputs)
+            outputs_holder.set_value(outputs)
     except KeyboardInterrupt:
         pass
 
