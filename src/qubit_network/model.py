@@ -172,6 +172,12 @@ def _fidelity_with_ptrace(i, matrix, target_states, num_ancillae):
 
 
 def _fidelity_no_ptrace(i, states, target_states):
+    """
+    Compute symbolic fidelity between `states[i]` and `target_states[i]`.
+
+    Both `states[i]` and `target_states[i]` are real vectors of same
+    length.
+    """
     state = states[i]
     target_state = target_states[i]
 
@@ -250,7 +256,7 @@ class FidelityGraph:
             # matrices and maps: `A * rho * B` becomes
             # `unvec(vec(tensor(A, B.T)) * vec(rho))`.
             vec_dm_ket = qutip.operator_to_vector(qutip.ket2dm(psi))
-            evolved_ket = target_gate * vec_dm_ket
+            evolved_ket = self.target_gate * vec_dm_ket
             evolved_ket = qutip.vector_to_operator(evolved_ket)
             target_states.append(evolved_ket)
         return target_states
@@ -347,5 +353,76 @@ class FidelityGraph:
         else:
             return fidelities
 
-    def updates(self):
-        pass
+
+def _sharedfloat(arr, name):
+    return theano.shared(np.asarray(arr, dtype=theano.config.floatX), name=name)
+
+
+class Optimizer:
+    def __init__(self,
+                 model,
+                 learning_rate=None,
+                 training_dataset_size=None,
+                 test_dataset_size=None,
+                 sgd_method='momentum'):
+        # initialization class attributes
+        self.model = model
+        self.index = T.lscalar('minibatch index')
+        self.learning_rate = _sharedfloat(learning_rate, 'learning rate')
+        self.training_dataset_size = training_dataset_size
+        self.test_dataset_size = test_dataset_size
+        inputs_length = 2 * 2**model.num_qubits
+        outputs_length = 2 * 2**model.num_system_qubits
+        self.train_inputs = _sharedfloat(
+            np.zeros((training_dataset_size, inputs_length)),
+            'training inputs'
+        )
+        self.train_outputs = _sharedfloat(
+            np.zeros((training_dataset_size, outputs_length)),
+            'training outputs'
+        )
+        self.test_inputs = _sharedfloat(
+            np.zeros((test_dataset_size, inputs_length)),
+            'test inputs'
+        )
+        self.test_outputs = _sharedfloat(
+            np.zeros((test_dataset_size, outputs_length)),
+            'test outputs'
+        )
+        self.cost = self.model.fidelity()
+        self.cost.name = 'mean fidelity'
+        self.grad = T.grad(cost=self.cost, wrt=self.model.parameters)
+        self.updates = self._make_updates(sgd_method)
+        # parse parameters
+
+    def _make_updates(self, sgd_method):
+        """Return updates, for `train_model` and `test_model`."""
+        assert isinstance(sgd_method, str)
+        # specify how to update the parameters of the model as a list of
+        # (variable, update expression) pairs
+        if sgd_method == 'momentum':
+            momentum = 0.5
+            updates = _gradient_updates_momentum(
+                self.model.parameters, self.grad, self.learning_rate, momentum)
+        else:
+            updates = [(
+                self.model.parameters,
+                self.model.parameters + self.learning_rate * self.grad
+            )]
+        return updates
+
+    def refill_test_data(self):
+        """Generate new test data and put them in shared variable.
+        """
+        inputs, outputs = self.model.generate_training_states(
+            self.test_dataset_size)
+        self.test_inputs.set_value(inputs)
+        self.test_outputs.set_value(outputs)
+
+    def refill_training_data(self):
+        """Generate new training data and put them in shared variable.
+        """
+        inputs, outputs = self.model.generate_training_states(
+            self.training_dataset_size)
+        self.train_inputs.set_value(inputs)
+        self.train_outputs.set_value(outputs)
