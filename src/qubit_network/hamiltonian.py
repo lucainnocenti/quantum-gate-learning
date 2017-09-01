@@ -228,7 +228,6 @@ class QubitNetworkHamiltonian:
         # interactions terms associated to the i-th symbol listed
         # in `symbols` (after sorting).
         self.matrices = []
-        # import ipdb; ipdb.set_trace()
         for idx, symb in enumerate(symbols):
             factor = sympy.Matrix(np.zeros((2 ** num_qubits,) * 2))
             for tuple_, label in zip(target_tuples, all_symbols):
@@ -268,6 +267,8 @@ class QubitNetworkHamiltonian:
             name='J',
             borrow=True  # still not sure what this does
         )
+        if self.initial_values is not None:
+            parameters.set_value(self.initial_values)
         # multiply variables with matrix coefficients
         bigreal_matrices = self._get_bigreal_matrices()
         theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
@@ -322,6 +323,6 @@ class QubitNetworkHamiltonian:
                     raise ValueError('The symbol {} doesn\'t match'
                                      ' any of the names of parameters of '
                                      'the model.'.format(str(symb)))
-            self.initial_values(init_values)
+            self.initial_values = init_values
         else:
-            raise NotImplementedError('Not implemented.')
+            self.initial_values = values

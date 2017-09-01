@@ -54,11 +54,10 @@ def _split_bigreal_ket(ket):
 
     Given an input ket vector in big real form, returns a pair of real
     vectors, the first containing the first N elements, and the second
-    containing the last N elements. The returned vectors have shape
-    (N, 1), to allow to perform dot products like A.T * B etc.
+    containing the last N elements.
     """
-    ket_real = ket[:ket.shape[0] // 2, None]
-    ket_imag = ket[ket.shape[0] // 2:, None]
+    ket_real = ket[:ket.shape[0] // 2]
+    ket_imag = ket[ket.shape[0] // 2:]
     return ket_real, ket_imag
 
 
@@ -70,7 +69,7 @@ def _ket_to_dm(ket):
     The outputs are real and imaginary part of the corresponding density
     matrix.
     """
-    ket_real, ket_imag = _split_bigreal_ket(ket)
+    ket_real, ket_imag = _split_bigreal_ket(ket)[:, None]
 
     dm_real = ket_real * ket_real.T + ket_imag * ket_imag.T
     dm_imag = ket_imag * ket_real.T - ket_real * ket_imag.T
@@ -196,7 +195,9 @@ class FidelityGraph:
                  hamiltonian_model, target_gate, ancillae_state=None):
         self.num_qubits = num_qubits
         self.num_system_qubits = num_system_qubits
-        self.parameters = parameters
+        self.parameters = parameters  # shared variable for parameters
+        self.inputs = T.dmatrix('inputs')
+        self.outputs = T.dmatrix('outputs')
         self.hamiltonian_model = hamiltonian_model
         if target_gate is not None:
             assert isinstance(target_gate, qutip.Qobj)
@@ -214,7 +215,6 @@ class FidelityGraph:
         fidelity of the resulting density matrix with the target
         (pure) state.
         """
-        assert output_states.shape[0] == target_states.shape[0]
         num_states = output_states.shape[0]
         fidelities, _ = theano.scan(
             fn=_fidelity_with_ptrace,
@@ -227,7 +227,6 @@ class FidelityGraph:
     def _fidelities_no_ptrace(output_states, target_states):
         """Compute fidelities when there are no ancillary qubits.
         """
-        assert output_states.shape[0] == target_states.shape[0]
         num_states = output_states.shape[0]
         fidelities, _ = theano.scan(
             fn=_fidelity_no_ptrace,
@@ -313,12 +312,18 @@ class FidelityGraph:
             if self.num_system_qubits < self.num_qubits:
                 ket = qutip.tensor(ket, self.ancillae_state)
             training_inputs[idx] = complex2bigreal(ket)
+        training_inputs = np.asarray(training_inputs)
         # 4) Convert target outputs in big real form.
         # NOTE: the target states are kets if the target gate is unitary,
         #       and density matrices for target open maps.
-        target_outputs = [complex2bigreal(st) for st in target_outputs]
-        # return results
-        return np.asarray(training_inputs), np.asarray(target_outputs)
+        target_outputs = np.asarray(
+            [complex2bigreal(st) for st in target_outputs])
+        # return results as matrices
+        _, len_inputs, _ = training_inputs.shape
+        _, len_outputs, _ = target_outputs.shape
+        training_inputs = training_inputs.reshape((num_states, len_inputs))
+        target_outputs = target_outputs.reshape((num_states, len_outputs))
+        return training_inputs, target_outputs
 
     def fidelity(self, return_mean=True):
         """Return theano graph for fidelity given training states.
@@ -328,17 +333,15 @@ class FidelityGraph:
         be replaced during the training through the `givens` parameter
         of `theano.function`.
         """
-        input_states = T.dmatrix('input states')
-        target_states = T.dmatrix('target states')
         output_states = T.tensordot(
-            self.compute_evolution_matrix(), input_states, axes=([1], [1])).T
+            self.compute_evolution_matrix(), self.inputs, axes=([1], [1])).T
         num_ancillae = self.num_qubits - self.num_system_qubits
         if num_ancillae > 0:
             fidelities = self._fidelities_with_ptrace(
-                output_states, target_states, num_ancillae)
+                output_states, self.outputs, num_ancillae)
         else:
             fidelities = self._fidelities_no_ptrace(output_states,
-                                                    target_states)
+                                                    self.outputs)
         if return_mean:
             return T.mean(fidelities)
         else:

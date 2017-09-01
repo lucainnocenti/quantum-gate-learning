@@ -110,7 +110,6 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
             (1, 0): b,
             (0, 3): c,
         }
-        # import ipdb; ipdb.set_trace()
         hamiltonian = QubitNetworkHamiltonian(
             num_qubits=2, net_topology=topology)
         hamiltonian_matrix = hamiltonian.get_matrix()

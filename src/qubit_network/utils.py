@@ -4,6 +4,7 @@ A collection of utility functions not yet categorized.
 from collections import OrderedDict
 import json
 import numpy as np
+import scipy
 import sympy
 
 import qutip
@@ -81,6 +82,20 @@ def bigreal2complex(arr):
         real_part = arr[:arr.shape[0] // 2, :arr.shape[1] // 2]
         imag_part = arr[arr.shape[0] // 2:, :arr.shape[1] // 2]
         return real_part + 1j * imag_part
+
+
+def bigreal2qobj(arr):
+    """Convert big real vector into corresponding qutip object."""
+    if arr.ndim == 1 or arr.shape[0] != arr.shape[1]:
+        arr = bigreal2complex(arr)
+        num_qubits = scipy.log2(arr.shape[0]).astype(int)
+        return qutip.Qobj(arr, dims=[[2] * num_qubits, [1] * num_qubits])
+    elif arr.shape[0] == arr.shape[1]:
+        arr = bigreal2complex(arr)
+        num_qubits = scipy.log2(arr.shape[0]).astype(int)
+        return qutip.Qobj(arr, dims=[[2] * num_qubits] * num_qubits)
+    else:
+        raise ValueError('Not sure what to do with this here.')
 
 
 def get_sigmas_index(indices):

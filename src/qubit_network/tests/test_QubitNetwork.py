@@ -34,7 +34,8 @@ class TestQubitNetworkHamiltonian(unittest.TestCase):
         J_pars = np.asarray(sympy.symbols('J0:4:4')).reshape((4, 4))
         hamiltonian_model = (pauli_product(0, 0) * J_pars[0, 0] +
                              pauli_product(1, 1) * J_pars[1, 1])
-        net = QubitNetwork(num_qubits=2, sympy_expr=hamiltonian_model)
+        net = QubitNetwork(num_qubits=2, sympy_expr=hamiltonian_model,
+                           initial_values=0)
         J, hamiltonian_graph = net.build_theano_graph()
         compute_hamiltonian = theano.function([], hamiltonian_graph)
         assert_array_equal(compute_hamiltonian(), np.zeros((8, 8)))
