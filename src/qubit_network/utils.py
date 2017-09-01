@@ -9,6 +9,9 @@ import sympy
 
 import qutip
 
+import theano
+import theano.tensor as T
+
 
 def complexrandn(dim1, dim2):
     """Generates an array of pseudorandom, normally chosen, complex numbers."""
@@ -97,6 +100,18 @@ def bigreal2qobj(arr):
     else:
         raise ValueError('Not sure what to do with this here.')
 
+
+def theano_matrix_grad(matrix, parameters):
+    shape = matrix.shape
+    num_elements = shape[0] * shape[1]
+    flattened_matrix = T.flatten(matrix)
+    def grad_element(i, arr):
+        return T.grad(arr[i], parameters)
+    flattened_grads, _ = theano.scan(fn=grad_element,
+                                     sequences=T.arange(num_elements),
+                                     non_sequences=flattened_matrix)
+    num_gradients = parameters.shape[0]
+    return T.reshape(flattened_grads.T, (num_gradients, shape[0], shape[1]))
 
 def get_sigmas_index(indices):
     """Takes a tuple and gives back a length-16 array with a single 1.
