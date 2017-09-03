@@ -19,7 +19,7 @@ import theano.tensor as T
 # package imports
 from .QubitNetwork import QubitNetwork
 from .net_analysis_tools import load_network_from_file
-from .model import FidelityGraph, _gradient_updates_momentum
+from .model import FidelityGraph, _gradient_updates_momentum, Optimizer
 
 
 def transfer_J_values(source_net, target_net):
@@ -46,6 +46,66 @@ def transfer_J_values(source_net, target_net):
     target_net.J.set_value(target_J)
 
 
+def _run_optimization(optimizer, n_epochs,
+                      truncate_fidelity_history=200,
+                      decay_rate=0.1):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    # whether to print the whole fidelity history every time or not
+    if truncate_fidelity_history is None:
+        fids_history = []
+    else:
+        fids_history = collections.deque(maxlen=truncate_fidelity_history)
+    # initialize figure for fidelity history
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+    # number of batches
+    # from IPython.core.debugger import set_trace; set_trace()
+    n_train_batches = optimizer.training_dataset_size // optimizer._batch_size
+    # create test states
+    optimizer.refill_test_data()
+    for n_epoch in range(n_epochs):
+        # compute fidelity and update parameters
+        for minibatch_index in range(n_train_batches):
+            optimizer.train_model(minibatch_index)
+        # update fidelity history
+        fids_history.append(optimizer.test_model())
+        if fids_history[-1] == 1:
+            print('Fidelity 1 obtained, stopping.')
+            break
+
+        # new_fidelities = np.array(test_model())
+        # new_fidelities = new_fidelities.reshape(
+        #     [new_fidelities.shape[0], 1])
+        # if n_epoch == 0:
+        #     fids_history = new_fidelities
+        # else:
+        #     fids_history = np.concatenate(
+        #         (fids_history, new_fidelities), axis=1)
+        # print(new_variance)
+        if truncate_fidelity_history is None:
+            ax.plot(fids_history, '-b')
+        else:
+            if len(fids_history) == truncate_fidelity_history:
+                x_coords = np.arange(
+                    n_epoch - truncate_fidelity_history + 1, n_epoch + 1)
+            else:
+                x_coords = np.arange(len(fids_history))
+
+            ax.clear()
+            ax.plot(x_coords, fids_history, '-b')
+        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+            optimizer.learning_rate.get_value(), fids_history[-1]))
+        fig.canvas.draw()
+
+        # update learning rate
+        _learning_rate = optimizer.learning_rate.get_value()
+        optimizer.learning_rate.set_value(
+            _learning_rate / (1 + decay_rate * n_epoch))
+
+        # generate a new set of training states
+        optimizer.refill_training_data()
+
+
 def sgd_optimization(
         net=None,
         learning_rate=0.13,
@@ -57,8 +117,6 @@ def sgd_optimization(
         test_dataset_size=1000,
         target_gate=None,
         decay_rate=0.1,
-        precompiled_functions=None,
-        print_fidelity=False,
         # plot_errors=False,
         truncate_fidelity_history=200,
         SGD_method='momentum'):
@@ -113,8 +171,6 @@ def sgd_optimization(
         If True, at every epoch the difference between max and min
         fidelities is reported.
     """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
     # -------- OPTIONS PARSING --------
 
     # Parse the `net` parameter.
@@ -146,177 +202,42 @@ def sgd_optimization(
         _net.save_to_file(backup_file)
         print('Network backup saved in {}'.format(backup_file))
 
-    # definition of utility functions for later on
-    def conditionally_save():
-        if isinstance(net, str):
-            _net.save_to_file(net)
-            print('Network saved in {}'.format(net))
-        elif saveafter_file is not None:
-            _net.save_to_file(saveafter_file)
-            print('Network saved in {}'.format(saveafter_file))
-
-    # -------- DATA GENERATION AND PREPARATION --------
-
-    print('Generating training data...')
-
+    # build model
     model = FidelityGraph(_net.num_qubits, _net.num_system_qubits,
                           *_net.build_theano_graph(), _net.target_gate)
-    # initialize training data
-    def new_training_data():
-        return model.generate_training_states(training_dataset_size)
-    inputs, outputs = new_training_data()
-    inputs_holder = theano.shared(
-        np.asarray(inputs, dtype=theano.config.floatX))
-    outputs_holder = theano.shared(
-        np.asarray(outputs, dtype=theano.config.floatX))
-    # initialize test data
-    test_inputs, test_outputs = model.generate_training_states(test_dataset_size)
-    # dataset = _net.generate_training_data(target_gate, training_dataset_size)
-    # states = theano.shared(np.asarray(dataset[0], dtype=theano.config.floatX))
-    # target_states = theano.shared(
-    #     np.asarray(dataset[1], dtype=theano.config.floatX))
-
-    # test_dataset = _net.generate_training_data(target_gate, test_dataset_size)
-    # test_states = theano.shared(
-    #     np.asarray(test_dataset[0], dtype=theano.config.floatX))
-    # test_target_states = theano.shared(
-    #     np.asarray(test_dataset[1], dtype=theano.config.floatX))
-
-    # -------- BUILD COMPUTATIONAL GRAPH FOR THE MBSGD --------
-
-    print('Building the model...')
-
-    # allocate symbolic variables for the data
-    index = T.lscalar()  # index to a minibatch
-
-    _learning_rate = theano.shared(
-        np.asarray(learning_rate, dtype=theano.config.floatX),
-        name='learning_rate')
-
-    # Define the cost function, that is, the fidelity. This is the
-    # number we ought to maximize through the training.
-    cost = model.fidelity()
-
-    # compute the gradient of the cost
-    g_J = T.grad(cost=cost, wrt=model.parameters)
-
-    # Theoretically it should be possible to reuse already compiled
-    # computational graph, but I didn't really test this functionality yet.
-    if precompiled_functions is None:
-        # compile the training function `train_model`, that while computing
-        # the cost at every iteration (batch), also updates the weights of
-        # the network based on the rules defined in `updates`.
-        # from IPython.core.debugger import set_trace; set_trace()
-        batch_start = index * batch_size
-        batch_end = (index + 1) * batch_size
-        train_model = theano.function(
-            inputs=[index],
-            outputs=cost,
-            updates=updates,
-            givens={
-                model.inputs: inputs_holder[batch_start: batch_end],
-                model.outputs: outputs_holder[batch_start: batch_end]
-            })
-
-        # `test_model` is used to test the fidelity given by the currently
-        # trained parameters. It's called at regular intervals during
-        # the computation, and is the value shown in the dynamically
-        # update plot that is shown when the training is ongoing.
-        test_model = theano.function(
-            inputs=[],
-            outputs=cost,
-            updates=None,
-            givens={model.inputs: test_inputs,
-                    model.outputs: test_outputs})
-    else:
-        train_model, test_model = precompiled_functions
+    # initialize optimizer
+    optimizer = Optimizer(model, learning_rate=1.,
+                          training_dataset_size=100,
+                          test_dataset_size=100,
+                          batch_size=10)
 
     # -------- DO THE ACTUAL MAXIMIZATION --------
 
     print('Let\'s roll!')
-    n_train_batches = training_dataset_size // batch_size
-    # fids_history = np.array([])
-    if truncate_fidelity_history is None:
-        fids_history = []
-    else:
-        fids_history = collections.deque(maxlen=truncate_fidelity_history)
-
-    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-
     # The try-except block allows to stop the computation with ctrl-C
     # without losing all the computed data. This effectively makes it
     # possible to stop the computation at any moment saving all the data
-    # like it would have happened were the computation ended on its own.
     try:
-        for n_epoch in range(n_epochs):
-            if print_fidelity:
-                print('Epoch {}, '.format(n_epoch), end='')
-
-            # compute fidelity and update parameters
-            for minibatch_index in range(n_train_batches):
-                train_model(minibatch_index)
-
-            # update fidelity history
-            fids_history.append(test_model())
-            if fids_history[-1] == 1:
-                print('Fidelity 1 obtained, stopping.')
-                break
-
-            # new_fidelities = np.array(test_model())
-            # new_fidelities = new_fidelities.reshape(
-            #     [new_fidelities.shape[0], 1])
-            # if n_epoch == 0:
-            #     fids_history = new_fidelities
-            # else:
-            #     fids_history = np.concatenate(
-            #         (fids_history, new_fidelities), axis=1)
-            # print(new_variance)
-            if print_fidelity:
-                print(fids_history[-1])
-
-            # if n_epoch > 0:
-            #     # update plot
-            #     sns.tsplot(fids_history, ci=100)
-            #     # ax.plot(fids_history, '-b')
-            #     plt.suptitle(('learning rate: {}\nfidelity: {}'
-            #                   '\nmax - min: {}').format(
-            #         _learning_rate.get_value(),
-            #         np.mean(fids_history[:, -1]),
-            #         np.ptp(fids_history[:, -1]))
-            #     )
-            #     fig.canvas.draw()
-            if truncate_fidelity_history is None:
-                ax.plot(fids_history, '-b')
-            else:
-                if len(fids_history) == truncate_fidelity_history:
-                    x_coords = np.arange(
-                        n_epoch - truncate_fidelity_history + 1, n_epoch + 1)
-                else:
-                    x_coords = np.arange(len(fids_history))
-
-                ax.clear()
-                ax.plot(x_coords, fids_history, '-b')
-            plt.suptitle('learning rate: {}\nfidelity: {}'.format(
-                _learning_rate.get_value(), fids_history[-1]))
-            fig.canvas.draw()
-
-            # update learning rate
-            _learning_rate.set_value(learning_rate /
-                                     (1 + decay_rate * n_epoch))
-
-            # generate a new set of training states
-            inputs, outputs = new_training_data()
-            inputs_holder.set_value(inputs)
-            outputs_holder.set_value(outputs)
+        _run_optimization(
+            optimizer, n_epochs,
+            truncate_fidelity_history=truncate_fidelity_history,
+            decay_rate=decay_rate
+        )
     except KeyboardInterrupt:
         pass
 
     print('Finished training')
     print('Final fidelity: ', end='')
-    print(_net.test_fidelity())
+    print(optimizer.test_model())
 
     # save results if appropriate parameters have been given
-    conditionally_save()
+    if isinstance(net, str):
+        _net.save_to_file(net)
+        print('Network saved in {}'.format(net))
+    elif saveafter_file is not None:
+        _net.save_to_file(saveafter_file)
+        print('Network saved in {}'.format(saveafter_file))
+
 
     # if precompiled_functions is None:
     #     return _net

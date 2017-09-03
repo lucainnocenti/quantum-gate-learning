@@ -364,6 +364,7 @@ class Optimizer:
                  learning_rate=None,
                  training_dataset_size=None,
                  test_dataset_size=None,
+                 batch_size=None,
                  sgd_method='momentum'):
         # initialization class attributes
         self.model = model
@@ -393,7 +394,36 @@ class Optimizer:
         self.cost.name = 'mean fidelity'
         self.grad = T.grad(cost=self.cost, wrt=self.model.parameters)
         self.updates = self._make_updates(sgd_method)
-        # parse parameters
+        if batch_size is None:
+            raise ValueError('Missing batch size value.')
+        self._batch_size = batch_size
+        # compile the training function `train_model`, that while computing
+        # the cost at every iteration (batch), also updates the weights of
+        # the network based on the rules defined in `updates`.
+        # from IPython.core.debugger import set_trace; set_trace()
+        batch_start = self.index * batch_size
+        batch_end = (self.index + 1) * batch_size
+        print('Compiling model ...', end='')
+        self.train_model = theano.function(
+            inputs=[self.index],
+            outputs=self.cost,
+            updates=self.updates,
+            givens={
+                self.model.inputs: self.train_inputs[batch_start: batch_end],
+                self.model.outputs: self.train_outputs[batch_start: batch_end]
+            })
+
+        # `test_model` is used to test the fidelity given by the currently
+        # trained parameters. It's called at regular intervals during
+        # the computation, and is the value shown in the dynamically
+        # updated plot that is shown when the training is ongoing.
+        self.test_model = theano.function(
+            inputs=[],
+            outputs=self.cost,
+            updates=None,
+            givens={self.model.inputs: self.test_inputs,
+                    self.model.outputs: self.test_outputs})
+        print(' done.')
 
     def _make_updates(self, sgd_method):
         """Return updates, for `train_model` and `test_model`."""
