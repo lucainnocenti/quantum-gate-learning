@@ -96,7 +96,7 @@ def bigreal2qobj(arr):
     elif arr.shape[0] == arr.shape[1]:
         arr = bigreal2complex(arr)
         num_qubits = scipy.log2(arr.shape[0]).astype(int)
-        return qutip.Qobj(arr, dims=[[2] * num_qubits] * num_qubits)
+        return qutip.Qobj(arr, dims=[[2] * num_qubits] * 2)
     else:
         raise ValueError('Not sure what to do with this here.')
 
@@ -110,8 +110,19 @@ def theano_matrix_grad(matrix, parameters):
     flattened_grads, _ = theano.scan(fn=grad_element,
                                      sequences=T.arange(num_elements),
                                      non_sequences=flattened_matrix)
-    num_gradients = parameters.shape[0]
-    return T.reshape(flattened_grads.T, (num_gradients, shape[0], shape[1]))
+    try:
+        # if `parameters` is a theano vector, flattened_grads results to
+        # be a matrix of shape Nx2
+        num_gradients = parameters.shape[0]
+        newshape = (num_gradients, shape[0], shape[1])
+        return T.reshape(flattened_grads.T, newshape)
+    except AttributeError:
+        # if `parameters` is a list of theano scalars, flattened_grads
+        # becomes a list of the corresponding gradients
+        if isinstance(flattened_grads, (list, tuple)):
+            return [T.reshape(grads_mat, shape) for grads_mat in flattened_grads]
+        else:
+            return T.reshape(flattened_grads, shape)
 
 def get_sigmas_index(indices):
     """Takes a tuple and gives back a length-16 array with a single 1.
@@ -227,10 +238,10 @@ def chop(arr, eps=1e-5):
         _arr = qutip.Qobj(_arr, dims=arr.dims)
         return _arr
     else:
-        arr = np.asarray(arr)
-        arr.real[np.abs(arr.real) < eps] = 0.0
-        arr.imag[np.abs(arr.imag) < eps] = 0.0
-        return arr
+        _arr = np.array(arr).astype(np.complex)
+        _arr.real[np.abs(_arr.real) < eps] = 0.0
+        _arr.imag[np.abs(_arr.imag) < eps] = 0.0
+        return _arr
 
 
 def transpose(list_of_lists):
