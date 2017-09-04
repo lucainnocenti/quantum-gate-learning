@@ -36,20 +36,18 @@ class QubitNetwork(QubitNetworkHamiltonian):
                  num_system_qubits=None,
                  interactions=None,
                  ancillae_state=None,
-                 target_gate=None,
                  net_topology=None,
                  sympy_expr=None,
                  initial_values=None):
         # parameters initialization
         self.system_qubits = None
-        self.target_gate = None
         self.num_system_qubits = None
         self.ancillae_state = None  # initial values for ancillae (if any)
         # Initialize QubitNetworkHamiltonian parent. This does two things:
         # 1. Computes `self.matrices` and `self.free_parameters`, to be
         #    later used to build the full Hamiltonian matrix (and thus
         #    the computational graph for the training).
-        # 2. Actually, just the thing above.
+        # 2. Actually, just that.
         super().__init__(num_qubits=num_qubits,
                          expr=sympy_expr,
                          interactions=interactions,
@@ -58,12 +56,6 @@ class QubitNetwork(QubitNetworkHamiltonian):
         # attribute `self.J` inherited from `QubitNetworkHamiltonian`,
         # which is shared theano tensor.
         self.set_initial_values(initial_values)
-        # `self.target_gate` is given a value when the net is being
-        # trained, for example by `sgd_optimization`. It is used simply
-        # to keep track of what the network was trained to reproduce.
-        # If no explicit value for `target_gate` is given, it is set
-        # during the training.
-        self.target_gate = target_gate
         # Build the initial state of the ancillae, if there are any
         if num_system_qubits is None:
             self.num_system_qubits = self.num_qubits
