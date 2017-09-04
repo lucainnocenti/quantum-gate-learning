@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import qutip
 
@@ -103,9 +104,7 @@ def _compute_fidelities_row_fn(row_idx, matrix, num_ancillae):
     return results
 
 
-# `compute_fidelities` is to be called by the immediately following
-# `theano.scan`. It returns the fidelities between the result of
-# evolving `states[i]` and `target_states[i]`, for each `i`.
+
 def _fidelity_with_ptrace(i, matrix, target_states, num_ancillae):
     """
     Compute fidelity between target and obtained states.
@@ -203,6 +202,8 @@ def _fidelity_no_ptrace(i, states, target_states):
 class FidelityGraph:
     def __init__(self, num_qubits, num_system_qubits, parameters,
                  hamiltonian_model, target_gate, ancillae_state=None):
+        # TODO: reduce attributes duplication, probably via binding the
+        #       `QubitNetwork` instance here and using values from there
         self.num_qubits = num_qubits
         self.num_system_qubits = num_system_qubits
         self.parameters = parameters  # shared variable for parameters
@@ -463,8 +464,44 @@ class Optimizer:
             raise NotImplementedError('To be reimplemented')
         return net
 
-    def _save_results(self):
-        raise NotImplementedError('WIP')
+    def save_results(self, file):
+        """Save optimization results.
+
+        The idea is here to save all the information required to
+        reproduce a given training session.
+        """
+        net_data = dict(
+            sympy_model=self.net.get_matrix(),
+            ancillae_state=self.net.ancillae_state,
+            initial_interactions=self.net.initial_values
+        )
+        optimization_data = dict(
+            target_gate=self.target_gate,
+            hyperparameters=self.hyperpars
+        )
+        # cut redundant log history
+        fids = self.log['fidelities']
+        # we cut from the history the last contiguous block of
+        # values that are closer to 1 than `eps`
+        eps = 1e-10
+        end_useful_log = np.diff(np.abs(1 - fids) < eps).nonzero()[0][-1]
+        saved_log = dict()
+        saved_log['fidelities'] = fids[:end_useful_log]
+        if self.log['parameters'] is not None:
+            saved_log['parameters'] = self.log['parameters'][:end_useful_log]
+        optimization_data['log'] = saved_log
+
+        data_to_save = dict(
+            net_data=net_data, optimization_data=optimization_data)
+        filename, ext = os.path.splitext(file)
+        if ext == '.pickle':
+            import pickle
+            with open(file, 'wb') as fp:
+                pickle.dump(data_to_save, fp)
+            print('Successfully saved to {}'.format(file))
+        else:
+            raise ValueError('Only saving to pickle is supported.')
+
 
     def _make_updates(self, sgd_method):
         """Return updates, for `train_model` and `test_model`."""
