@@ -4,7 +4,11 @@ import qutip
 import theano
 import theano.tensor as T
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from .utils import complex2bigreal
+
 
 def _gradient_updates_momentum(params, grad, learning_rate, momentum):
     """
@@ -359,58 +363,83 @@ def _sharedfloat(arr, name):
 
 
 class Optimizer:
-    def __init__(self,
-                 model,
-                 learning_rate=None,
-                 training_dataset_size=None,
-                 test_dataset_size=None,
+    """
+    Main object handling the optimization of a `QubitNetwork` instance.
+    """
+    # pylint: disable=too-many-instance-attributes
+    def __init__(self, net,
+                 learning_rate=None, decay_rate=None,
+                 training_dataset_size=None, test_dataset_size=None,
                  batch_size=None,
+                 n_epochs=None,
+                 target_gate=None,
                  sgd_method='momentum'):
-        # initialization class attributes
-        self.model = model
-        self.index = T.lscalar('minibatch index')
-        self.learning_rate = _sharedfloat(learning_rate, 'learning rate')
-        self.training_dataset_size = training_dataset_size
-        self.test_dataset_size = test_dataset_size
-        inputs_length = 2 * 2**model.num_qubits
-        outputs_length = 2 * 2**model.num_system_qubits
-        self.train_inputs = _sharedfloat(
-            np.zeros((training_dataset_size, inputs_length)),
-            'training inputs'
+        if batch_size is None:
+            raise ValueError('Missing batch size value.')
+        if learning_rate is None:
+            raise ValueError('Missing value for `learning_rate`.')
+        # the net parameter can be a QubitNetwork object or a str
+        self.net = Optimizer._load_net(net)
+        self.target_gate = target_gate
+        self.model = FidelityGraph(
+            self.net.num_qubits, self.net.num_system_qubits,
+            *self.net.build_theano_graph(), self.target_gate
         )
-        self.train_outputs = _sharedfloat(
-            np.zeros((training_dataset_size, outputs_length)),
-            'training outputs'
+        self.hyperpars = dict(
+            train_dataset_size=training_dataset_size,
+            test_dataset_size=test_dataset_size,
+            batch_size=batch_size,
+            n_epochs=n_epochs,
+            sgd_method=sgd_method,
+            initial_learning_rate=learning_rate,
+            decay_rate=decay_rate
         )
-        self.test_inputs = _sharedfloat(
-            np.zeros((test_dataset_size, inputs_length)),
-            'test inputs'
-        )
-        self.test_outputs = _sharedfloat(
-            np.zeros((test_dataset_size, outputs_length)),
-            'test outputs'
+        # self.vars stores the shared variables for the computation
+        inputs_length = 2 * 2**self.net.num_qubits
+        outputs_length = 2 * 2**self.net.num_system_qubits
+        self.vars = dict(
+            index=T.lscalar('minibatch index'),
+            learning_rate=_sharedfloat(learning_rate, 'learning rate'),
+            train_inputs=_sharedfloat(
+                np.zeros((training_dataset_size, inputs_length)),
+                'training inputs'),
+            train_outputs=_sharedfloat(
+                np.zeros((training_dataset_size, outputs_length)),
+                'training outputs'),
+            test_inputs=_sharedfloat(
+                np.zeros((test_dataset_size, inputs_length)),
+                'test inputs'),
+            test_outputs=_sharedfloat(
+                np.zeros((test_dataset_size, outputs_length)),
+                'test outputs'),
+            parameters=self.model.parameters
         )
         self.cost = self.model.fidelity()
         self.cost.name = 'mean fidelity'
-        self.grad = T.grad(cost=self.cost, wrt=self.model.parameters)
+        self.grad = T.grad(cost=self.cost, wrt=self.vars['parameters'])
+        # define updates, to be performed at every call of `train_XXX`
         self.updates = self._make_updates(sgd_method)
-        if batch_size is None:
-            raise ValueError('Missing batch size value.')
-        self._batch_size = batch_size
+        # initialize log to be filled with the history later
+        self.log = {'fidelities': None, 'parameters': None}
+        # create figure object
+        self._fig = None
+        self._ax = None
         # compile the training function `train_model`, that while computing
         # the cost at every iteration (batch), also updates the weights of
         # the network based on the rules defined in `updates`.
         # from IPython.core.debugger import set_trace; set_trace()
-        batch_start = self.index * batch_size
-        batch_end = (self.index + 1) * batch_size
+        batch_start = self.vars['index'] * batch_size
+        batch_end = (self.vars['index'] + 1) * batch_size
+        train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
+        train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
         print('Compiling model ...', end='')
         self.train_model = theano.function(
-            inputs=[self.index],
+            inputs=[self.vars['index']],
             outputs=self.cost,
             updates=self.updates,
             givens={
-                self.model.inputs: self.train_inputs[batch_start: batch_end],
-                self.model.outputs: self.train_outputs[batch_start: batch_end]
+                self.model.inputs: train_inputs_batch,
+                self.model.outputs: train_outputs_batch
             })
 
         # `test_model` is used to test the fidelity given by the currently
@@ -421,9 +450,21 @@ class Optimizer:
             inputs=[],
             outputs=self.cost,
             updates=None,
-            givens={self.model.inputs: self.test_inputs,
-                    self.model.outputs: self.test_outputs})
+            givens={self.model.inputs: self.vars['test_inputs'],
+                    self.model.outputs: self.vars['test_outputs']})
         print(' done.')
+
+    @staticmethod
+    def _load_net(net):
+        """
+        Parse the `net` parameter given during init of `Optimizer`.
+        """
+        if isinstance(net, str):
+            raise NotImplementedError('To be reimplemented')
+        return net
+
+    def _save_results(self):
+        raise NotImplementedError('WIP')
 
     def _make_updates(self, sgd_method):
         """Return updates, for `train_model` and `test_model`."""
@@ -432,27 +473,117 @@ class Optimizer:
         # (variable, update expression) pairs
         if sgd_method == 'momentum':
             momentum = 0.5
+            learn_rate = self.vars['learning_rate']
             updates = _gradient_updates_momentum(
-                self.model.parameters, self.grad, self.learning_rate, momentum)
+                self.vars['parameters'], self.grad,
+                learn_rate, momentum)
         else:
-            updates = [(
-                self.model.parameters,
-                self.model.parameters + self.learning_rate * self.grad
-            )]
+            new_pars = self.vars['parameters']
+            new_pars += self.vars['learning_rate'] * self.grad
+            updates = [(self.vars['parameters'], new_pars)]
         return updates
+
+    def _update_fig(self, len_shown_history):
+        # retrieve or create figure object
+        if self._fig is None:
+            self._fig, self._ax = plt.subplots(1, 1, figsize=(10, 5))
+        fig, ax = self._fig, self._ax
+        ax.clear()
+        # plot new fidelities
+        n_epoch = self.log['n_epoch']
+        fids = self.log['fidelities']
+        if len_shown_history is None:
+            ax.plot(fids[:n_epoch], '-b')
+        else:
+            if n_epoch + 1 == len_shown_history:
+                x_coords = np.arange(
+                    n_epoch - len_shown_history + 1, n_epoch + 1)
+            else:
+                x_coords = np.arange(n_epoch + 1)
+            ax.plot(x_coords, fids[x_coords], '-b')
+        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
+            self.vars['learning_rate'].get_value(), fids[n_epoch]))
+        fig.canvas.draw()
 
     def refill_test_data(self):
         """Generate new test data and put them in shared variable.
         """
         inputs, outputs = self.model.generate_training_states(
-            self.test_dataset_size)
-        self.test_inputs.set_value(inputs)
-        self.test_outputs.set_value(outputs)
+            self.hyperpars['test_dataset_size'])
+        self.vars['test_inputs'].set_value(inputs)
+        self.vars['test_outputs'].set_value(outputs)
 
     def refill_training_data(self):
         """Generate new training data and put them in shared variable.
         """
         inputs, outputs = self.model.generate_training_states(
-            self.training_dataset_size)
-        self.train_inputs.set_value(inputs)
-        self.train_outputs.set_value(outputs)
+            self.hyperpars['train_dataset_size'])
+        self.vars['train_inputs'].set_value(inputs)
+        self.vars['train_outputs'].set_value(outputs)
+
+    def train_epoch(self):
+        """Generate training states and train for an epoch."""
+        self.refill_training_data()
+        n_train_batches = (self.hyperpars['train_dataset_size'] //
+                           self.hyperpars['batch_size'])
+        for minibatch_index in range(n_train_batches):
+            self.train_model(minibatch_index)
+
+    def test_epoch(self, save_parameters=True):
+        """Compute fidelity, and store fidelity and parameters."""
+        fidelity = self.test_model()
+        n_epoch = self.log['n_epoch']
+        if save_parameters:
+            self.log['parameters'][n_epoch] = (
+                self.vars['parameters'].get_value())
+        self.log['fidelities'][n_epoch] = fidelity
+
+    def _run(self, save_parameters=True, len_shown_history=200):
+        # generate testing states
+        self.refill_test_data()
+
+        n_epochs = self.hyperpars['n_epochs']
+        # initialize log
+        self.log['fidelities'] = np.zeros(n_epochs)
+        if save_parameters:
+            self.log['parameters'] = np.zeros((
+                n_epochs, len(self.vars['parameters'].get_value())))
+        # run epochs
+        for n_epoch in range(n_epochs):
+            self.log['n_epoch'] = n_epoch
+            self.train_epoch()
+            self.test_epoch(save_parameters=save_parameters)
+            self._update_fig(len_shown_history)
+            # stop if fidelity 1 is obtained
+            if self.log['fidelities'][-1] == 1:
+                print('Fidelity 1 obtained, stopping.')
+                break
+            # update learning rate
+            self.vars['learning_rate'].set_value(
+                self.hyperpars['initial_learning_rate'] / (
+                    1 + self.hyperpars['decay_rate'] * n_epoch))
+
+    def run(self, save_parameters=True, len_shown_history=200,
+            save_after=None):
+        """
+        Start the optimization.
+
+        Parameters
+        ----------
+        save_parameters : bool, optional
+            If True, the entire history of the parameters is stored.
+        len_shown_history : int, optional
+            If not None, the figure showing the fidelity for every epoch
+            only shows the last `len_shown_history` epochs.
+        save_after : str, optional
+            If not None, it is used to save the results to file.
+        """
+        args = locals()
+        # catch abort to stop training at will
+        try:
+            self._run(args)
+        except KeyboardInterrupt:
+            pass
+
+        if save_after is not None:
+            self._save_results()
