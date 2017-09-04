@@ -20,6 +20,7 @@ import theano.tensor as T
 from .QubitNetwork import QubitNetwork
 from .net_analysis_tools import load_network_from_file
 from .model import FidelityGraph, _gradient_updates_momentum, Optimizer
+from IPython.core.debugger import set_trace
 
 
 def transfer_J_values(source_net, target_net):
@@ -44,66 +45,6 @@ def transfer_J_values(source_net, target_net):
             target_J[target_idx] = J
 
     target_net.J.set_value(target_J)
-
-
-def _run_optimization(optimizer, n_epochs,
-                      truncate_fidelity_history=200,
-                      decay_rate=0.1):
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    # whether to print the whole fidelity history every time or not
-    if truncate_fidelity_history is None:
-        fids_history = []
-    else:
-        fids_history = collections.deque(maxlen=truncate_fidelity_history)
-    # initialize figure for fidelity history
-    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-    # number of batches
-    # from IPython.core.debugger import set_trace; set_trace()
-    n_train_batches = optimizer.training_dataset_size // optimizer._batch_size
-    # create test states
-    optimizer.refill_test_data()
-    for n_epoch in range(n_epochs):
-        # compute fidelity and update parameters
-        for minibatch_index in range(n_train_batches):
-            optimizer.train_model(minibatch_index)
-        # update fidelity history
-        fids_history.append(optimizer.test_model())
-        if fids_history[-1] == 1:
-            print('Fidelity 1 obtained, stopping.')
-            break
-
-        # new_fidelities = np.array(test_model())
-        # new_fidelities = new_fidelities.reshape(
-        #     [new_fidelities.shape[0], 1])
-        # if n_epoch == 0:
-        #     fids_history = new_fidelities
-        # else:
-        #     fids_history = np.concatenate(
-        #         (fids_history, new_fidelities), axis=1)
-        # print(new_variance)
-        if truncate_fidelity_history is None:
-            ax.plot(fids_history, '-b')
-        else:
-            if len(fids_history) == truncate_fidelity_history:
-                x_coords = np.arange(
-                    n_epoch - truncate_fidelity_history + 1, n_epoch + 1)
-            else:
-                x_coords = np.arange(len(fids_history))
-
-            ax.clear()
-            ax.plot(x_coords, fids_history, '-b')
-        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
-            optimizer.learning_rate.get_value(), fids_history[-1]))
-        fig.canvas.draw()
-
-        # update learning rate
-        _learning_rate = optimizer.learning_rate.get_value()
-        optimizer.learning_rate.set_value(
-            _learning_rate / (1 + decay_rate * n_epoch))
-
-        # generate a new set of training states
-        optimizer.refill_training_data()
 
 
 def sgd_optimization(
@@ -171,30 +112,6 @@ def sgd_optimization(
         If True, at every epoch the difference between max and min
         fidelities is reported.
     """
-    # -------- OPTIONS PARSING --------
-
-    # Parse the `net` parameter.
-    # `net` is the argument obtained from the interface,
-    # `_net` is the variable used in the function (usually derived from `net`)
-    _net = None
-    if net is None:
-        raise ValueError('The `net` parameter is mandatory.')
-    elif isinstance(net, str):
-        # assume `net` is the path where the network was stored
-        _net = load_network_from_file(net)
-
-    if _net is None:
-        _net = net
-
-    # parse `target_gate` parameter
-    if target_gate is None:
-        if _net.target_gate is None:
-            raise ValueError('`target_gate` must have a value.')
-        else:
-            target_gate = _net.target_gate
-    else:
-        _net.target_gate = target_gate
-
     # parse `backup_file` parameter
     if isinstance(backup_file, str):
         # we will assume that it is the path where to backup the net
