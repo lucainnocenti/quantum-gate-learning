@@ -397,68 +397,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
             fidelities[idx] = fidelity[0, 0].real
         return fidelities.mean()
 
-    # `fidelity_1s` computes the fidelity over a single pair
-    # of state and target state, as opposite as the computation of the
-    # mini-batch averages (using `theano.scan`) done by `fidelity`.
-    def fidelity_1s(self, state, target_state, J=None):
-        """Compute the fidelity from a single pair of states."""
-        # this builds the Hamiltonian of the system (in big real matrix
-        # form), already multiplied with the 1j factor and ready for
-        # exponentiation.
-        H = self.build_H_factors(symbolic_result=True, J=J)
-        # expH is the unitary evolution of the system
-        expH = T.slinalg.expm(H)
-        Uxpsi = T.dot(expH, state).reshape((state.shape[0], 1))
-        Uxpsi_real = Uxpsi[:Uxpsi.shape[0] // 2]
-        Uxpsi_imag = Uxpsi[Uxpsi.shape[0] // 2:]
-        dm_real = Uxpsi_real * Uxpsi_real.T + Uxpsi_imag * Uxpsi_imag.T
-        dm_imag = Uxpsi_imag * Uxpsi_real.T - Uxpsi_real * Uxpsi_imag.T
 
-        def col_fn(col_idx, row_idx, matrix):
-            subm_dim = 2 ** self.num_ancillae
-            return T.nlinalg.trace(
-                matrix[row_idx * subm_dim:(row_idx + 1) * subm_dim,
-                       col_idx * subm_dim:(col_idx + 1) * subm_dim])
-
-        def row_fn(row_idx, matrix):
-            results, _ = theano.scan(
-                fn=col_fn,
-                sequences=T.arange(matrix.shape[1] // 2 ** self.num_ancillae),
-                non_sequences=[row_idx, matrix]
-            )
-            return results
-
-        dm_real_traced, _ = theano.scan(
-            fn=row_fn,
-            sequences=T.arange(dm_real.shape[0] // 2 ** self.num_ancillae),
-            non_sequences=[dm_real]
-        )
-        dm_imag_traced, _ = theano.scan(
-            fn=row_fn,
-            sequences=T.arange(dm_imag.shape[0] // 2 ** self.num_ancillae),
-            non_sequences=[dm_imag]
-        )
-
-        target_state_real = target_state[:target_state.shape[0] // 2, None]
-        target_state_imag = target_state[target_state.shape[0] // 2:, None]
-        target_dm_real = (target_state_real * target_state_real.T +
-                          target_state_imag * target_state_imag.T)
-        target_dm_imag = (target_state_imag * target_state_real.T -
-                          target_state_real * target_state_imag.T)
-
-        prod_real = (T.dot(dm_real_traced, target_dm_real) -
-                     T.dot(dm_imag_traced, target_dm_imag))
-        tr_real = T.nlinalg.trace(prod_real)
-
-        # prod_imag = (T.dot(dm_real_traced, target_dm_imag) +
-        #              T.dot(dm_imag_traced, target_dm_real))
-        # tr_imag = T.nlinalg.trace(prod_imag)
-
-        # tr_abs = T.sqrt(tr_real ** 2 + tr_imag ** 2)
-
-        # guess we should show why this is correct?
-        return tr_real
-    
     def net_parameters_to_dataframe(self, stringify_index=False):
         """
         Take parameters from a QubitNetwork object and put it in DataFrame.
