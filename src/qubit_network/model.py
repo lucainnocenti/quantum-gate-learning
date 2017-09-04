@@ -57,6 +57,28 @@ def _gradient_updates_momentum(params, grad, learning_rate, momentum):
     return updates
 
 
+def _gradient_updates_adadelta(params, grads):
+    eps = 1e-6
+    rho = 0.95
+    # initialize needed shared variables
+    def shared_from_var(p):
+        return theano.shared(
+            p.get_value() * np.asarray(0, dtype=theano.config.floatX))
+    zgrads = shared_from_var(params)
+    rparams2 = shared_from_var(params)
+    rgrads2 = shared_from_var(params)
+
+    zgrads_update = (zgrads, grads)
+    rgrads2_update = (rgrads2, rho * rgrads2 + (1 - rho) * grads**2)
+
+    params_step = -T.sqrt(rparams2 + eps) / T.sqrt(rgrads2 + eps) * zgrads
+    rparams2_update = (rparams2, rho * rparams2 + (1 - rho) * params_step**2)
+    params_update = (params, params - params_step)
+
+    updates = (zgrads_update, rgrads2_update, rparams2_update, params_update)
+    return updates
+
+
 def _split_bigreal_ket(ket):
     """Splits in half a real vector of length 2N
 
@@ -565,6 +587,9 @@ class Optimizer:
             updates = _gradient_updates_momentum(
                 self.vars['parameters'], self.grad,
                 learn_rate, momentum)
+        elif sgd_method == 'adadelta':
+            updates = _gradient_updates_adadelta(
+                self.vars['parameters'], self.grad)
         else:
             new_pars = self.vars['parameters']
             new_pars += self.vars['learning_rate'] * self.grad
