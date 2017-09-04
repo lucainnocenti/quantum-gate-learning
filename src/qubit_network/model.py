@@ -1,4 +1,6 @@
 import os
+import sympy
+import pandas as pd
 import numpy as np
 import qutip
 
@@ -9,6 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from .utils import complex2bigreal
+from .QubitNetwork import QubitNetwork
 
 
 def _gradient_updates_momentum(params, grad, learning_rate, momentum):
@@ -500,6 +503,27 @@ class Optimizer:
             raise NotImplementedError('To be reimplemented')
         return net
 
+    def _get_meaningful_history(self):
+        fids = self.log['fidelities']
+        # we cut from the history the last contiguous block of
+        # values that are closer to 1 than `eps`
+        eps = 1e-10
+        try:
+            end_useful_log = np.diff(np.abs(1 - fids) < eps).nonzero()[0][-1]
+        # if the fidelity didn't converge to 1 the above raises an
+        # IndexError. We then look to remove all the trailing zeros
+        except IndexError:
+            try:
+                end_useful_log = np.diff(fids == 0).nonzero()[0][-1]
+            # if also the above doesn't work, we just return the whole thing
+            except IndexError:
+                end_useful_log = len(fids)
+        saved_log = dict()
+        saved_log['fidelities'] = fids[:end_useful_log]
+        if self.log['parameters'] is not None:
+            saved_log['parameters'] = self.log['parameters'][:end_useful_log]
+        return saved_log
+
     def save_results(self, file):
         """Save optimization results.
 
@@ -516,17 +540,8 @@ class Optimizer:
             hyperparameters=self.hyperpars
         )
         # cut redundant log history
-        fids = self.log['fidelities']
-        # we cut from the history the last contiguous block of
-        # values that are closer to 1 than `eps`
-        eps = 1e-10
-        end_useful_log = np.diff(np.abs(1 - fids) < eps).nonzero()[0][-1]
-        saved_log = dict()
-        saved_log['fidelities'] = fids[:end_useful_log]
-        if self.log['parameters'] is not None:
-            saved_log['parameters'] = self.log['parameters'][:end_useful_log]
-        optimization_data['log'] = saved_log
-
+        optimization_data['log'] = self._get_meaningful_history()
+        # prepare and finally save to file
         data_to_save = dict(
             net_data=net_data, optimization_data=optimization_data)
         filename, ext = os.path.splitext(file)
@@ -660,3 +675,12 @@ class Optimizer:
 
         if save_after is not None:
             self._save_results()
+
+    def plot_parameters_history(self):
+        import cufflinks
+        cufflinks.go_offline()
+        names = [par.name for par in self.net.free_parameters]
+        df = pd.DataFrame(self._get_meaningful_history()['parameters'])
+        new_col_names = dict(zip(range(df.shape[1]), names))
+        df.rename(columns=new_col_names, inplace=True)
+        df.iplot()
