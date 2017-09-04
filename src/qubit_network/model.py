@@ -400,10 +400,6 @@ class Optimizer:
                  n_epochs=None,
                  target_gate=None,
                  sgd_method='momentum'):
-        if batch_size is None:
-            raise ValueError('Missing batch size value.')
-        if learning_rate is None:
-            raise ValueError('Missing value for `learning_rate`.')
         # the net parameter can be a QubitNetwork object or a str
         self.net = Optimizer._load_net(net)
         self.target_gate = target_gate
@@ -450,35 +446,6 @@ class Optimizer:
         # create figure object
         self._fig = None
         self._ax = None
-        # compile the training function `train_model`, that while computing
-        # the cost at every iteration (batch), also updates the weights of
-        # the network based on the rules defined in `updates`.
-        # from IPython.core.debugger import set_trace; set_trace()
-        batch_start = self.vars['index'] * batch_size
-        batch_end = (self.vars['index'] + 1) * batch_size
-        train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
-        train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
-        print('Compiling model ...', end='')
-        self.train_model = theano.function(
-            inputs=[self.vars['index']],
-            outputs=self.cost,
-            updates=self.updates,
-            givens={
-                self.model.inputs: train_inputs_batch,
-                self.model.outputs: train_outputs_batch
-            })
-
-        # `test_model` is used to test the fidelity given by the currently
-        # trained parameters. It's called at regular intervals during
-        # the computation, and is the value shown in the dynamically
-        # updated plot that is shown when the training is ongoing.
-        self.test_model = theano.function(
-            inputs=[],
-            outputs=self.cost,
-            updates=None,
-            givens={self.model.inputs: self.vars['test_inputs'],
-                    self.model.outputs: self.vars['test_outputs']})
-        print(' done.')
 
     @classmethod
     def load(cls, file):
@@ -566,7 +533,7 @@ class Optimizer:
         # prepare and finally save to file
         data_to_save = dict(
             net_data=net_data, optimization_data=optimization_data)
-        filename, ext = os.path.splitext(file)
+        _, ext = os.path.splitext(file)
         if ext == '.pickle':
             import pickle
             with open(file, 'wb') as fp:
@@ -651,9 +618,43 @@ class Optimizer:
                 self.vars['parameters'].get_value())
         self.log['fidelities'][n_epoch] = fidelity
 
+    def _compile_model(self):
+        """Compile train and test models.
+        
+        Compile the training function `train_model`, that while computing
+        the cost at every iteration (batch), also updates the weights of
+        the network based on the rules defined in `updates`.
+        """
+        batch_size = self.hyperpars['batch_size']
+        batch_start = self.vars['index'] * batch_size
+        batch_end = (self.vars['index'] + 1) * batch_size
+        train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
+        train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
+        print('Compiling model ...', end='')
+        self.train_model = theano.function(
+            inputs=[self.vars['index']],
+            outputs=self.cost,
+            updates=self.updates,
+            givens={
+                self.model.inputs: train_inputs_batch,
+                self.model.outputs: train_outputs_batch
+            })
+        # `test_model` is used to test the fidelity given by the currently
+        # trained parameters. It's called at regular intervals during
+        # the computation, and is the value shown in the dynamically
+        # updated plot that is shown when the training is ongoing.
+        self.test_model = theano.function(
+            inputs=[],
+            outputs=self.cost,
+            updates=None,
+            givens={self.model.inputs: self.vars['test_inputs'],
+                    self.model.outputs: self.vars['test_outputs']})
+        print(' done.')
+
     def _run(self, save_parameters=True, len_shown_history=200):
         # generate testing states
         self.refill_test_data()
+        self._compile_model()
 
         n_epochs = self.hyperpars['n_epochs']
         # initialize log
@@ -668,7 +669,7 @@ class Optimizer:
             self.test_epoch(save_parameters=save_parameters)
             self._update_fig(len_shown_history)
             # stop if fidelity 1 is obtained
-            if self.log['fidelities'][-1] == 1:
+            if self.log['fidelities'][n_epoch] == 1:
                 print('Fidelity 1 obtained, stopping.')
                 break
             # update learning rate
