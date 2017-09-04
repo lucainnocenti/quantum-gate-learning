@@ -455,6 +455,42 @@ class Optimizer:
                     self.model.outputs: self.vars['test_outputs']})
         print(' done.')
 
+    @classmethod
+    def load(cls, file):
+        """Load from saved file."""
+        import pickle
+        basename, ext = os.path.splitext(file)
+        if ext != '.pickle':
+            raise NotImplementedError('Only pickle files for now!')
+        with open(file, 'rb') as f:
+            data = pickle.load(f)
+        net_data = data['net_data']
+        opt_data = data['optimization_data']
+        # create QubitNetwork instance
+        num_qubits = np.log2(net_data['sympy_model'].shape[0]).astype(int)
+        if net_data['ancillae_state'] is None:
+            num_system_qubits = num_qubits
+        else:
+            raise NotImplementedError('WIP')
+        net = QubitNetwork(num_qubits=num_qubits,
+                           num_system_qubits=num_system_qubits,
+                           sympy_expr=net_data['sympy_model'],
+                           initial_values=net_data['initial_interactions'])
+        # call __init__ to create `Optimizer` instance
+        hyperpars = opt_data['hyperparameters']
+        optimizer = cls(
+            net,
+            learning_rate=hyperpars['initial_learning_rate'],
+            decay_rate=hyperpars['decay_rate'],
+            training_dataset_size=hyperpars['train_dataset_size'],
+            test_dataset_size=hyperpars['test_dataset_size'],
+            batch_size=hyperpars['batch_size'],
+            n_epochs=hyperpars['n_epochs'],
+            sgd_method=hyperpars['sgd_method'],
+            target_gate=opt_data['target_gate'])
+        optimizer.log = opt_data['log']
+        return optimizer
+
     @staticmethod
     def _load_net(net):
         """
