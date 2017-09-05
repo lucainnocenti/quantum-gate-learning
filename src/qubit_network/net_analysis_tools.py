@@ -129,7 +129,7 @@ def print_saved_nets_info(path=None):
             data[-1]['name'] = os.path.splitext(os.path.basename(net_file))[0]
             data[-1]['num_qubits'] = net.num_qubits
             data[-1]['num_ancillae'] = net.num_ancillae
-            data[-1]['fid'] = net.test_fidelity_without_theano(n_samples=100)
+            data[-1]['fid'] = net.fidelity_test(n_samples=100)
         except:
             print('An error was raised during processing of {}'.format(
                 net_file))
@@ -352,6 +352,35 @@ def dataframe_parameters_to_net(df, column_index, net=None):
 # ----------------------------------------------------------------
 # Loading nets from file
 # ----------------------------------------------------------------
+def _load_network_from_pickle_old(data):
+    """Rebuild QubitNetworkModel from old style saved data."""
+    # from IPython.core.debugger import set_trace; set_trace()
+    topology = data.get('net_topology', None)
+    interactions = data.get('interactions', None)
+    if isinstance(interactions, list):
+        # nets saved in the past used notation ((0, 1), 'xx'), as opposite
+        # to the currently supported (1, 1). Here we do the conversion
+        # from old to new style
+        new_ints = []
+        translation_rule = {'x': 1, 'y': 2, 'z': 3}
+        for targets, types in interactions:
+            new_int = [0] * data['num_qubits']
+            if not isinstance(targets, tuple):
+                targets = (targets,)
+            for target, type_ in zip(targets, list(types)):
+                new_int[target] = translation_rule[type_]
+            new_ints.append(new_int)
+        interactions = new_ints
+
+    ints_values = data.get('J')
+    net = QubitNetworkModel(
+        num_qubits=data['num_qubits'],
+        num_system_qubits=data['num_system_qubits'],
+        interactions=interactions,
+        net_topology=topology,
+        target_gate=data['target_gate'],
+        initial_values=ints_values)
+    return net
 
 
 def _load_network_from_pickle(filename):
@@ -364,7 +393,16 @@ def _load_network_from_pickle(filename):
 
     with open(filename, 'rb') as file:
         data = pickle.load(file)
-    return data
+    if 'J' in data:
+        return _load_network_from_pickle_old(data)
+    # otherwise we can just use `sympy_model`:
+    net_data = data['net_data']
+    opt_data = data['optimization_data']
+    net = QubitNetworkModel(sympy_expr=net_data['sympy_model'],
+                            target_gate=opt_data['target_gate'],
+                            free_parameters_order=net_data['free_parameters'],
+                            initial_values=opt_data['final_interactions'])
+    return net
 
 
 def _load_network_from_json(filename):
@@ -378,6 +416,7 @@ def load_network_from_file(filename, fmt=None):
     # if no format has been given, get it from the file name
     if fmt is None:
         _, fmt = os.path.splitext(filename)
+        fmt = fmt[1:]
     # decide which function to call to load the data
     if fmt == 'pickle':
         return _load_network_from_pickle(filename)
@@ -399,7 +438,6 @@ class NetDataFile:
         self.ext = self.ext[1:]
         # the actual `QubitNetwork` object is only loaded when required
         self._data = None
-        self._net = None
 
     def __repr__(self):
         return self.name + ' (' + self.ext + ')'
@@ -436,42 +474,6 @@ class NetDataFile:
             self._load()
         return self._data
 
-    def _load_net_old(self):
-        """Rebuild QubitNetworkModel from old style saved data."""
-        data = self.data
-        topology = data.get('net_topology', None)
-        interactions = data.get('interactions', None)
-        ints_values = data.get('J')
-        net = QubitNetworkModel(
-            num_qubits=data['num_qubits'],
-            num_system_qubits=data['num_system_qubits'],
-            interactions=interactions,
-            net_topology=topology,
-            target_gate=data['target_gate'],
-            initial_values=ints_values)
-        return net
-
-    @property
-    def net(self):
-        """The QubitNetworkModel correponding to the file."""
-        if self._net is not None:
-            return self._net
-        # otherwise rebuild `QubitNetworkModel` from `self.data`
-        # pass the ball to _get_fidelity_old for old style saved nets
-        if 'J' in self.data:
-            self._net = self._load_net_old()
-            return self._net
-        # otherwise we can just use `sympy_model`:
-        sympy_model = self.data['net_data']['sympy_model']
-        opt_data = self.data['optimization_data']
-        interaction_values = opt_data['final_interactions']
-        target_gate = opt_data['target_gate']
-        net = QubitNetworkModel(sympy_expr=sympy_model,
-                                initial_values=interaction_values,
-                                target_gate=target_gate)
-        self._net = net
-        return self._net
-
     def _get_interactions_old_style(self):
         data = self.data
         topology = data.get('net_topology', None)
@@ -489,35 +491,17 @@ class NetDataFile:
             ints_out = list(zip(interactions, ints_values))
         return ints_out
 
-    def _get_interactions(self):
-        data = self.data
-        pars_names = data['net_data']['sympy_model'].free_symbols
-        pars_values = data['optimization_data']['final_interactions']
-        return list(zip(pars_names, pars_values))
-
     @property
     def interactions(self):
         """
         Gives the trained interactions in a nicely formatted DataFrame.
         """
-        # old style net data
-        if 'J' in self.data:
-            ints_pairs = self._get_interactions_old_style()
-        # new style optimizer data
-        else:
-            ints_pairs = self._get_interactions()
-        interactions, values = list(zip(*ints_pairs))
+        interactions, values = self.free_parameters, self.parameters.get_value()
         # now put everything in dataframe
         return pd.DataFrame({
             'interaction': interactions,
             'value': values
-        })
-
-    @property
-    def fidelity(self):
-        """The trained fidelity."""
-        from IPython.core.debugger import set_trace; set_trace()
-        return net.fidelity_test(n_samples=100)
+        }).set_index('interaction')
 
 
 class NetsDataFolder:
@@ -632,7 +616,7 @@ class NetsDataFolder:
 
     def view_fidelities(self, n_samples=40):
         data = self._repr_dataframe()
-        fids = [net.test_fidelity_without_theano(n_samples=n_samples)
+        fids = [net.fidelity_test(n_samples=n_samples)
                 for net in self.nets]
         data = pd.concat((
             data,
@@ -647,7 +631,7 @@ class NetsDataFolder:
         data = None
         for net in self.nets:
             # compute fidelity for net
-            fid = net.test_fidelity_without_theano(n_samples=n_samples)
+            fid = net.fidelity_test(n_samples=n_samples)
             # get data for net
             new_df = net.interactions.rename(columns={'value': fid})
             if data is None:
