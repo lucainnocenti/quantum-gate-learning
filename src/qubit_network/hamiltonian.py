@@ -75,7 +75,13 @@ class QubitNetworkHamiltonian:
     """Compute the Hamiltonian for the qubit network.
 
     The Hamiltonian can be generated in several different ways, depending
-    on the arguments given.
+    on the arguments given. Note that `QubitNetworkHamiltonian` is not
+    supposed to know anything about ancillae, system qubits and so on.
+    This class is only to parse input arguments (interactions, topology
+    or sympy expression) in order to extract free symbols and matrix
+    coefficients of a whole qubit network. The distinction between
+    system and ancillary qubits comes next with `QubitNetwork`.
+
     Parameters
     ----------
     num_qubits : int,
@@ -98,10 +104,9 @@ class QubitNetworkHamiltonian:
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
         self.matrices = None  # matrix coefficients for free parameters
-        self.free_parameters = None  # parameters to be trained
+        self.free_parameters = None  # symbolic parameters of the model
         self.interactions = None  # list of active interactions, if meaningful
         self.net_topology = None
-        self.initial_values = None  # values from which training starts
 
         # Extract lists of parameters and matrices to which each is to
         # be multiplied
@@ -235,46 +240,6 @@ class QubitNetworkHamiltonian:
                     factor += pauli_product(*tuple_)
             self.matrices.append(factor)
 
-    def _get_bigreal_matrices(self, multiply_by_j=True):
-        """
-        Multiply each element of `self.matrices` with `-1j`, and return
-        them converted to big real form. Or optionally do not multiply
-        with the imaginary unit and just return the matrix coefficients
-        converted in big real form.
-        """
-        if multiply_by_j:
-            return [complex2bigreal(-1j * matrix).astype(np.float)
-                    for matrix in self.matrices]
-        else:
-            return [complex2bigreal(matrix).astype(np.float)
-                    for matrix in self.matrices]
-
-    def build_theano_graph(self):
-        """Build theano object corresponding to the Hamiltonian model.
-
-        The free parameters in the output graphs are taken from the sympy
-        free symbols in the Hamiltonian, stored in `self.free_parameters`.
-
-        Returns
-        -------
-        tuple with the shared theano variable representing the parameters
-        and the corresponding theano.tensor object for the Hamiltonian
-        model, ***multiplied by -1j***.
-        """
-        # define the theano variables
-        parameters = theano.shared(
-            value=np.zeros(len(self.free_parameters), dtype=np.float),
-            name='J',
-            borrow=True  # still not sure what this does
-        )
-        if self.initial_values is not None:
-            parameters.set_value(self.initial_values)
-        # multiply variables with matrix coefficients
-        bigreal_matrices = self._get_bigreal_matrices()
-        theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
-        # from IPython.core.debugger import set_trace; set_trace()
-        return [parameters, theano_graph]
-
     def get_matrix(self):
         """Return the Hamiltonian matrix as a sympy matrix object."""
         # final_matrix = sympy.MatrixSymbol('H', *self.matrices[0].shape)
@@ -282,47 +247,3 @@ class QubitNetworkHamiltonian:
         for matrix, parameter in zip(self.matrices, self.free_parameters):
             final_matrix += parameter * matrix
         return final_matrix
-
-    def set_initial_values(self, values=None):
-        """Set initial values for the parameters in the Hamiltonian.
-
-        If no explicit values are given, the parameters are initialized
-        with zeros.
-        """
-        if values is None:
-            self.initial_values = np.random.randn(len(self.free_parameters))
-        elif isinstance(values, numbers.Number):
-            self.initial_values = np.ones(len(self.free_parameters)) * values
-        # A dictionary can be used to directly set the values of some of
-        # the parameters. Each key of the dictionary can be either a
-        # 1) sympy symbol correponding to an interaction, 2) a string
-        # with the same name of a symbol of an interaction or 3) a tuple
-        # of integers corresponding to a given interactions. This last
-        # option is not valid if the Hamiltonian was created using a
-        # sympy expression.
-        # All the symbols not specified in the dictionary are initialized
-        # to zero.
-        elif isinstance(values, dict):
-            init_values = np.zeros(len(self.free_parameters))
-            symbols_dict = dict(zip(
-                self.free_parameters, range(len(self.free_parameters))))
-            for symb, value in values.items():
-                # if `symb` is a single number, make a 1-element tuple
-                if isinstance(symb, numbers.Number):
-                    symb = (symb,)
-                # convert strings to corresponding sympy symbols
-                if isinstance(symb, str):
-                    symb = sympy.Symbol(symb)
-                # `symb` can be a tuple when a key is of the form
-                # `(1, 3)` to indicate an X1Z2 interaction.
-                elif isinstance(symb, tuple):
-                    symb = 'J' + ''.join(str(char) for char in symb)
-                try:
-                    init_values[symbols_dict[symb]] = value
-                except KeyError:
-                    raise ValueError('The symbol {} doesn\'t match'
-                                     ' any of the names of parameters of '
-                                     'the model.'.format(str(symb)))
-            self.initial_values = init_values
-        else:
-            self.initial_values = values

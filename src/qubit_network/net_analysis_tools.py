@@ -475,6 +475,23 @@ class NetDataFile:
             'value': values
         })
 
+    def _get_fidelity_old(self):
+        """Retrieve fidelity for old-style saved nets."""
+        data = self.data
+        topology = data.get('net_topology', None)
+        interactions = data.get('interactions', None)
+        ints_values = data.get('J')
+        net = QubitNetwork(
+            num_qubits=data['num_qubits'],
+            num_system_qubits=data['num_system_qubits'],
+            interactions=interactions,
+            net_topology=topology)
+
+    @property
+    def fidelity(self):
+        """The trained fidelity."""
+
+
 
 class NetsDataFolder:
     """

@@ -1,4 +1,5 @@
 import os
+import numbers
 import sympy
 import pandas as pd
 import numpy as np
@@ -224,21 +225,35 @@ def _fidelity_no_ptrace(i, states, target_states):
     return fidelity
 
 
-class FidelityGraph:
-    def __init__(self, num_qubits, num_system_qubits, parameters,
-                 hamiltonian_model, target_gate, ancillae_state=None):
-        # TODO: reduce attributes duplication, probably via binding the
-        #       `QubitNetwork` instance here and using values from there
-        self.num_qubits = num_qubits
-        self.num_system_qubits = num_system_qubits
-        self.parameters = parameters  # shared variable for parameters
+class QubitNetworkModel(QubitNetwork):
+    """Handling of theano graph buliding on top of the QubitNetwork.
+
+    Here we add the theano variables and functions to compute fidelity
+    and so on. Note that the target gate is still not set here, but
+    is given upon calling the Optimizer.
+    """
+    def __init__(self, num_qubits=None, num_system_qubits=None,
+                 interactions=None,
+                 net_topology=None,
+                 sympy_expr=None,
+                 ancillae_state=None,
+                 initial_values=None):
+        # Initialize `QubitNetwork` parent
+        super().__init__(num_qubits=num_qubits,
+                         num_system_qubits=num_system_qubits,
+                         interactions=interactions,
+                         ancillae_state=ancillae_state,
+                         net_topology=net_topology,
+                         sympy_expr=sympy_expr)
+        # attributes initialization
+        self.initial_values = self._set_initial_values(initial_values)
+        self.parameters, self.hamiltonian_model = self.build_theano_graph()
+        # self.inputs and self.outputs are the holders for the training/testing
+        # inputs and correpsonding output states. They are used to build
+        # the theano expression for the `fidelity`.
         self.inputs = T.dmatrix('inputs')
         self.outputs = T.dmatrix('outputs')
-        self.hamiltonian_model = hamiltonian_model
-        if target_gate is not None:
-            assert isinstance(target_gate, qutip.Qobj)
-        self.target_gate = target_gate
-        self.ancillae_state = ancillae_state
+        self.target_gate = None
 
     @staticmethod
     def _fidelities_with_ptrace(output_states, target_states, num_ancillae):
@@ -383,6 +398,91 @@ class FidelityGraph:
         else:
             return fidelities
 
+    def _set_initial_values(self, values=None):
+        """Set initial values for the parameters in the Hamiltonian.
+
+        If no explicit values are given, the parameters are initialized
+        with zeros. The computed initial values are returned, to be
+        stored in self.initial_values from __init__
+        """
+        if values is None:
+            initial_values = np.random.randn(len(self.free_parameters))
+        elif isinstance(values, numbers.Number):
+            initial_values = np.ones(len(self.free_parameters)) * values
+        # A dictionary can be used to directly set the values of some of
+        # the parameters. Each key of the dictionary can be either a
+        # 1) sympy symbol correponding to an interaction, 2) a string
+        # with the same name of a symbol of an interaction or 3) a tuple
+        # of integers corresponding to a given interactions. This last
+        # option is not valid if the Hamiltonian was created using a
+        # sympy expression.
+        # All the symbols not specified in the dictionary are initialized
+        # to zero.
+        elif isinstance(values, dict):
+            init_values = np.zeros(len(self.free_parameters))
+            symbols_dict = dict(zip(
+                self.free_parameters, range(len(self.free_parameters))))
+            for symb, value in values.items():
+                # if `symb` is a single number, make a 1-element tuple
+                if isinstance(symb, numbers.Number):
+                    symb = (symb,)
+                # convert strings to corresponding sympy symbols
+                if isinstance(symb, str):
+                    symb = sympy.Symbol(symb)
+                # `symb` can be a tuple when a key is of the form
+                # `(1, 3)` to indicate an X1Z2 interaction.
+                elif isinstance(symb, tuple):
+                    symb = 'J' + ''.join(str(char) for char in symb)
+                try:
+                    init_values[symbols_dict[symb]] = value
+                except KeyError:
+                    raise ValueError('The symbol {} doesn\'t match'
+                                     ' any of the names of parameters of '
+                                     'the model.'.format(str(symb)))
+            initial_values = init_values
+        else:
+            initial_values = values
+
+        return initial_values
+
+    def _get_bigreal_matrices(self, multiply_by_j=True):
+        """
+        Multiply each element of `self.matrices` with `-1j`, and return
+        them converted to big real form. Or optionally do not multiply
+        with the imaginary unit and just return the matrix coefficients
+        converted in big real form.
+        """
+        if multiply_by_j:
+            return [complex2bigreal(-1j * matrix).astype(np.float)
+                    for matrix in self.matrices]
+        else:
+            return [complex2bigreal(matrix).astype(np.float)
+                    for matrix in self.matrices]
+
+    def build_theano_graph(self):
+        """Build theano object corresponding to the Hamiltonian model.
+
+        The free parameters in the output graphs are taken from the sympy
+        free symbols in the Hamiltonian, stored in `self.free_parameters`.
+
+        Returns
+        -------
+        tuple with the shared theano variable representing the parameters
+        and the corresponding theano.tensor object for the Hamiltonian
+        model, ***multiplied by -1j***.
+        """
+        # define the theano variables
+        parameters = theano.shared(
+            value=np.zeros(len(self.free_parameters), dtype=np.float),
+            name='J',
+            borrow=True  # still not sure what this does
+        )
+        parameters.set_value(self.initial_values)
+        # multiply variables with matrix coefficients
+        bigreal_matrices = self._get_bigreal_matrices()
+        theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
+        # from IPython.core.debugger import set_trace; set_trace()
+        return [parameters, theano_graph]
 
 class Optimizer:
     """
@@ -391,7 +491,8 @@ class Optimizer:
     # pylint: disable=too-many-instance-attributes
     def __init__(self, net,
                  learning_rate=None, decay_rate=None,
-                 training_dataset_size=None, test_dataset_size=None,
+                 training_dataset_size=10,
+                 test_dataset_size=10,
                  batch_size=None,
                  n_epochs=None,
                  target_gate=None,
@@ -399,10 +500,6 @@ class Optimizer:
         # the net parameter can be a QubitNetwork object or a str
         self.net = Optimizer._load_net(net)
         self.target_gate = target_gate
-        self.model = FidelityGraph(
-            self.net.num_qubits, self.net.num_system_qubits,
-            *self.net.build_theano_graph(), self.target_gate
-        )
         self.hyperpars = dict(
             train_dataset_size=training_dataset_size,
             test_dataset_size=test_dataset_size,
@@ -433,9 +530,9 @@ class Optimizer:
             test_outputs=_sharedfloat(
                 np.zeros((test_dataset_size, outputs_length)),
                 'test outputs'),
-            parameters=self.model.parameters
+            parameters=self.net.parameters
         )
-        self.cost = self.model.fidelity()
+        self.cost = self.net.fidelity()
         self.cost.name = 'mean fidelity'
         self.grad = T.grad(cost=self.cost, wrt=self.vars['parameters'])
         # define updates, to be performed at every call of `train_XXX`
@@ -526,7 +623,7 @@ class Optimizer:
             target_gate=self.target_gate,
             hyperparameters=self.hyperpars,
             initial_interactions=self.net.initial_values,
-            final_interactions=self.vars['parameters'].get_value()
+            final_interactions=self._get_meaningful_history()['parameters'][-1]
         )
         # cut redundant log history
         optimization_data['log'] = self._get_meaningful_history()
@@ -588,7 +685,7 @@ class Optimizer:
     def refill_test_data(self):
         """Generate new test data and put them in shared variable.
         """
-        inputs, outputs = self.model.generate_training_states(
+        inputs, outputs = self.net.generate_training_states(
             self.hyperpars['test_dataset_size'])
         self.vars['test_inputs'].set_value(inputs)
         self.vars['test_outputs'].set_value(outputs)
@@ -596,7 +693,7 @@ class Optimizer:
     def refill_training_data(self):
         """Generate new training data and put them in shared variable.
         """
-        inputs, outputs = self.model.generate_training_states(
+        inputs, outputs = self.net.generate_training_states(
             self.hyperpars['train_dataset_size'])
         self.vars['train_inputs'].set_value(inputs)
         self.vars['train_outputs'].set_value(outputs)
@@ -636,8 +733,8 @@ class Optimizer:
             outputs=self.cost,
             updates=self.updates,
             givens={
-                self.model.inputs: train_inputs_batch,
-                self.model.outputs: train_outputs_batch
+                self.net.inputs: train_inputs_batch,
+                self.net.outputs: train_outputs_batch
             })
         # `test_model` is used to test the fidelity given by the currently
         # trained parameters. It's called at regular intervals during
@@ -647,8 +744,8 @@ class Optimizer:
             inputs=[],
             outputs=self.cost,
             updates=None,
-            givens={self.model.inputs: self.vars['test_inputs'],
-                    self.model.outputs: self.vars['test_outputs']})
+            givens={self.net.inputs: self.vars['test_inputs'],
+                    self.net.outputs: self.vars['test_outputs']})
         print(' done.')
 
     def _run(self, save_parameters=True, len_shown_history=200):

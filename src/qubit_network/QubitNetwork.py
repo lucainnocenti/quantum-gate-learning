@@ -28,8 +28,7 @@ from .hamiltonian import QubitNetworkHamiltonian
 
 
 class QubitNetwork(QubitNetworkHamiltonian):
-    """
-    Main object representing the qubit network.
+    """Implement distinction between system and ancillae.
     """
     def __init__(self,
                  num_qubits=None,
@@ -37,40 +36,23 @@ class QubitNetwork(QubitNetworkHamiltonian):
                  interactions=None,
                  ancillae_state=None,
                  net_topology=None,
-                 sympy_expr=None,
-                 initial_values=None):
+                 sympy_expr=None):
         # parameters initialization
-        self.system_qubits = None
-        self.num_system_qubits = None
         self.ancillae_state = None  # initial values for ancillae (if any)
-        # Initialize QubitNetworkHamiltonian parent. This does two things:
-        # 1. Computes `self.matrices` and `self.free_parameters`, to be
-        #    later used to build the full Hamiltonian matrix (and thus
-        #    the computational graph for the training).
-        # 2. Actually, just that.
+
+        # Initialize QubitNetworkHamiltonian parent. This computes
+        # `self.matrices` and `self.free_parameters`.
         super().__init__(num_qubits=num_qubits,
                          expr=sympy_expr,
                          interactions=interactions,
                          net_topology=net_topology)
-        # Initialize values of parameter in graph. This is stored in the
-        # attribute `self.J` inherited from `QubitNetworkHamiltonian`,
-        # which is shared theano tensor.
-        self.set_initial_values(initial_values)
         # Build the initial state of the ancillae, if there are any
         if num_system_qubits is None:
             self.num_system_qubits = self.num_qubits
         else:
             self.num_system_qubits = num_system_qubits
         if self.num_system_qubits < self.num_qubits:
-            self._initialize_ancillae(ancillae_state)
-        # if self.num_ancillae > 0:
-        #     if ancillae_state is None:
-        #         self.ancillae_state = self.build_ancilla_state()
-        #     else:
-        #         self.ancillae_state = ancillae_state
-        # else:
-        #     self.ancillae_state = None
-        
+            self._initialize_ancillae(ancillae_state)        
 
     def _initialize_ancillae(self, ancillae_state):
         """Returns an initial ancilla state, as a qutip.Qobj object.
@@ -81,14 +63,6 @@ class QubitNetwork(QubitNetworkHamiltonian):
         state = qutip.tensor([qutip.basis(2, 0)
                               for _ in range(self.num_ancillae)])
         return state
-
-
-    def tuple_to_J_index(self, interaction):
-        if self.net_topology is None:
-            # if `pair` is a self-interaction
-            return self.interactions.index(interaction)
-        else:
-            raise NotImplementedError('I didn\'t implement this yet, sorry!')
 
     def J_index_to_interaction(self, index):
         """
@@ -179,70 +153,6 @@ class QubitNetwork(QubitNetworkHamiltonian):
                         matching_interactions.append(interaction)
                 outlist.append(matching_interactions)
             return outlist
-
-    def get_interactions_with_Js(self, renormalize_parameters=False):
-        """
-        Gives a dict associating each interaction to the correspoding J.
-
-        Parameters
-        ----------
-        renormalize_parameters : bool
-            If True, multiplies the pairwise interactions by 4 and the
-            self-interactions by 2.
-        """
-        if self.net_topology is None:
-            outdict = OrderedDict()
-            Js = self.J.get_value()
-            for interaction, J in zip(self.interactions, Js):
-                # if `renormalize_parameter` is set to True the results
-                # are printed using the convention in which the terms
-                # in the Hamiltonian are 1/4 for the pairwise
-                # interactions and 1/2 for the self-interactions.
-                if renormalize_parameters:
-                    if len(interaction[1]) == 2:
-                        outdict[interaction] = 4 * J
-                    elif len(interaction[1]) == 1:
-                        outdict[interaction] = 2 * J
-                else:
-                    outdict[interaction] = J
-            return outdict
-        else:
-            symbols = self.net_topology_symbols
-            outdict = OrderedDict()
-            Js = self.J.get_value()
-            for idx, symbol in enumerate(symbols):
-                interactions = []
-                renormalize = 0
-                for interaction, label in self.net_topology.items():
-                    if label == symbol:
-                        interactions.append(interaction)
-                        # the following mess is to check that it makes
-                        # sense to renormalize the parameters associated
-                        # with a symbol: if a symbol is associated to
-                        # both pairwise and self- interactions then we
-                        # cannot consistently renormalize the Js.
-                        if renormalize_parameters:
-                            if len(interaction[1]) == 2 and renormalize == 2:
-                                renormalize = 0
-                                print('Can\' properly renormalize the paramete'
-                                      'rs, reverting to non-renormalized form.'
-                                     )
-                            elif len(interaction[1]) == 1 and renormalize == 4:
-                                renormalize = 0
-                                print('Can\' properly renormalize the paramete'
-                                      'rs, reverting to non-renormalized form.'
-                                     )
-                            elif renormalize == 0:
-                                if len(interaction[1]) == 2:
-                                    renormalize = 4
-                                elif len(interaction[1]) == 1:
-                                    renormalize = 2
-
-                if not renormalize_parameters:
-                    renormalize = 1
-                outdict[tuple(interactions)] = Js[idx] * renormalize
-
-            return outdict
 
     def test_fidelity(self,
                       states=None, target_states=None,
