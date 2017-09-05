@@ -56,8 +56,40 @@ ccHadamard = (qutip.tensor(qutip.projection(2, 0, 0), qutip.qeye(2), qutip.qeye(
 [ccS3qb]: ../data/nets/ccS_3q_all_1fid.pickle
 [ccH3qb]: ../data/nets/ccH_3q_all_1fid.pickle
 
-## 3-qubit gates without ancillae, restricted sets of interactions
-We here investigate the training of 3-qubit networks to implement unitary evolutions, without ancillary qubits, without however allowing for all possible interaction terms in the network.
+## 3-qubit Toffoli gates, using topology obtained after conditions
+
+Generating code, also found in [toffoli_only_diagonal_from_reduced_expression.ipynb](toffoli_only_diagonal_from_reduced_expression.ipynb) ([view on nbviewer](https://nbviewer.jupyter.org/github/lucainnocenti/quantum-gate-learning/blob/0879f34de99ffc55dcc344c198e7c1e3c64c699a/notebooks/toffoli_only_diagonal_from_reduced_expression.ipynb)):
+
+    def J(*args):
+        return sympy.Symbol('J' + ''.join(str(arg) for arg in args))
+    def pauli(*args):
+        return pauli_product(*args)
+    toffoli_diagonal = J(3, 0, 0) * (pauli(3, 0, 0) + pauli(0, 3, 0))
+    toffoli_diagonal += J(0, 0, 1) * pauli(0, 0, 1)
+    toffoli_diagonal += J(0, 3, 3) * (2 * pauli(0, 0, 3) + pauli(0, 3, 3) + pauli(3, 0, 3))
+    toffoli_diagonal += J(1, 0, 1) * (pauli(1, 0, 0) + pauli(0, 1, 0)) * (pauli(0, 0, 0) + pauli(0, 0, 1))
+    toffoli_diagonal += J(2, 2, 0) * (pauli(1, 1, 0) + pauli(2, 2, 0))
+    toffoli_diagonal += J(3, 3, 0) * pauli(3, 3, 0)
+    toffoli_diagonal_symmetric = toffoli_diagonal
+
+    plt.style.use('ggplot')
+    net = QubitNetworkModel(sympy_expr=toffoli_diagonal, initial_values=1)
+    optimizer = Optimizer(
+        net=net,
+        learning_rate=1.,
+        n_epochs=500,
+        batch_size=2,
+        target_gate=qutip.toffoli(),
+        training_dataset_size=200,
+        test_dataset_size=100,
+        decay_rate=.005,
+        sgd_method='momentum'
+    )
+    optimizer.run()
+Corresponding parameters historie*s* [here](https://nbviewer.jupyter.org/github/lucainnocenti/quantum-gate-learning/tree/0879f34de99ffc55dcc344c198e7c1e3c64c699a/data/parameters_histories/).
+
+### Toffoli gate with only diagonal interactions
+Starting with the initial "Ansatz" provided by Abdullah, we easily find a solution for the Toffoli using only interactions of type `xx`, `yy`, `zz`, `x`, `y`, `z`.
 
 ## 3 qubits + 1 ancilla networks, regular topology, only z selfinteractions
 
