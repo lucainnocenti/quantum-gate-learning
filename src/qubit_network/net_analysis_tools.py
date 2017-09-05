@@ -363,27 +363,7 @@ def _load_network_from_pickle(filename):
 
     with open(filename, 'rb') as file:
         data = pickle.load(file)
-
-    if 'target_gate' not in data.keys():
-        data['target_gate'] = None
-
-    if 'net_topology' not in data.keys():
-        data['net_topology'] = None
-
-    if 'ancillae_state' not in data.keys():
-        num_ancillae = data['num_qubits'] - data['num_system_qubits']
-        data['ancillae_state'] = qutip.tensor(
-            [qutip.basis(2, 0) for _ in range(num_ancillae)])
-
-    net = QubitNetwork(
-        num_qubits=data['num_qubits'],
-        interactions=data['interactions'],
-        system_qubits=data['num_system_qubits'],
-        ancillae_state=data['ancillae_state'],
-        target_gate=data['target_gate'],
-        net_topology=data['net_topology'],
-        J=data['J'])
-    return net
+    return data
 
 
 def _load_network_from_json(filename):
@@ -454,29 +434,46 @@ class NetDataFile:
             self._load()
         return self._data
 
+    def _get_interactions_old_style(self):
+        data = self.data
+        topology = data.get('net_topology', None)
+        interactions = data.get('interactions', None)
+        ints_values = data.get('J')
+        if topology is not None:
+            ints_dict = collections.OrderedDict()
+            for interaction, symb in topology.items():
+                try:
+                    ints_dict[symb].append(interaction)
+                except KeyError:
+                    ints_dict[symb] = [interaction]
+            ints_out = list(zip(ints_dict.values(), ints_values))
+        else:
+            ints_out = list(zip(interactions, ints_values))
+        return ints_out
+
+    def _get_interactions(self):
+        data = self.data
+        pars_names = data['net_data']['sympy_model'].free_symbols
+        pars_values = data['optimization_data']['final_interactions']
+        return list(zip(pars_names, pars_values))
+
     @property
     def interactions(self):
         """
         Gives the trained interactions in a nicely formatted DataFrame.
         """
-        # from IPython.core.debugger import set_trace; set_trace()
-        interactions_pairs = self.data.get_interactions_with_Js()
-        interactions, values = list(zip(*interactions_pairs.items()))
-        qubits, type_ = list(zip(*interactions))
-        # ensure that also self-interaction targets are tuples
-        def ensure_tuple(pair):
-            try:
-                tuple(pair)
-            except TypeError:
-                pair = (pair,)
-            return pair
-        qubits = [ensure_tuple(qubit) for qubit in qubits]
+        # old style net data
+        if 'J' in self.data:
+            ints_pairs = self._get_interactions_old_style()
+        # new style optimizer data
+        else:
+            ints_pairs = self._get_interactions()
+        interactions, values = list(zip(*ints_pairs))
         # now put everything in dataframe
         return pd.DataFrame({
-            'qubits': qubits,
-            'type': type_,
+            'interaction': interactions,
             'value': values
-        }).set_index(['qubits', 'type'])
+        })
 
 
 class NetsDataFolder:

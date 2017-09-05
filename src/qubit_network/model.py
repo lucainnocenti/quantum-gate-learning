@@ -384,10 +384,6 @@ class FidelityGraph:
             return fidelities
 
 
-def _sharedfloat(arr, name):
-    return theano.shared(np.asarray(arr, dtype=theano.config.floatX), name=name)
-
-
 class Optimizer:
     """
     Main object handling the optimization of a `QubitNetwork` instance.
@@ -417,6 +413,9 @@ class Optimizer:
             decay_rate=decay_rate
         )
         # self.vars stores the shared variables for the computation
+        def _sharedfloat(arr, name):
+            return theano.shared(np.asarray(
+                arr, dtype=theano.config.floatX), name=name)
         inputs_length = 2 * 2**self.net.num_qubits
         outputs_length = 2 * 2**self.net.num_system_qubits
         self.vars = dict(
@@ -451,7 +450,7 @@ class Optimizer:
     def load(cls, file):
         """Load from saved file."""
         import pickle
-        basename, ext = os.path.splitext(file)
+        _, ext = os.path.splitext(file)
         if ext != '.pickle':
             raise NotImplementedError('Only pickle files for now!')
         with open(file, 'rb') as f:
@@ -467,7 +466,7 @@ class Optimizer:
         net = QubitNetwork(num_qubits=num_qubits,
                            num_system_qubits=num_system_qubits,
                            sympy_expr=net_data['sympy_model'],
-                           initial_values=net_data['initial_interactions'])
+                           initial_values=opt_data['initial_interactions'])
         # call __init__ to create `Optimizer` instance
         hyperpars = opt_data['hyperparameters']
         optimizer = cls(
@@ -521,12 +520,13 @@ class Optimizer:
         """
         net_data = dict(
             sympy_model=self.net.get_matrix(),
-            ancillae_state=self.net.ancillae_state,
-            initial_interactions=self.net.initial_values
+            ancillae_state=self.net.ancillae_state
         )
         optimization_data = dict(
             target_gate=self.target_gate,
-            hyperparameters=self.hyperpars
+            hyperparameters=self.hyperpars,
+            initial_interactions=self.net.initial_values,
+            final_interactions=self.vars['parameters'].get_value()
         )
         # cut redundant log history
         optimization_data['log'] = self._get_meaningful_history()
