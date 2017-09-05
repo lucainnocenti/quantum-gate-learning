@@ -869,11 +869,15 @@ class Optimizer:
         if save_after is not None:
             self._save_results()
 
-    def plot_parameters_history(self):
+    def plot_parameters_history(self, return_fig=False, return_df=False):
         import cufflinks
         cufflinks.go_offline()
         names = [par.name for par in self.net.free_parameters]
         df = pd.DataFrame(self._get_meaningful_history()['parameters'])
         new_col_names = dict(zip(range(df.shape[1]), names))
         df.rename(columns=new_col_names, inplace=True)
+        if return_df:
+            return df
+        if return_fig:
+            return df.iplot(asFigure=True)
         df.iplot()
