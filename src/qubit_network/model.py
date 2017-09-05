@@ -1,6 +1,7 @@
 import os
 import numbers
 import sympy
+import scipy
 import pandas as pd
 import numpy as np
 import qutip
@@ -225,19 +226,23 @@ def _fidelity_no_ptrace(i, states, target_states):
     return fidelity
 
 
+class TargetGateNotGivenError(Exception):
+    pass
+
+
 class QubitNetworkModel(QubitNetwork):
     """Handling of theano graph buliding on top of the QubitNetwork.
 
     Here we add the theano variables and functions to compute fidelity
-    and so on. Note that the target gate is still not set here, but
-    is given upon calling the Optimizer.
+    and so on.
     """
     def __init__(self, num_qubits=None, num_system_qubits=None,
                  interactions=None,
                  net_topology=None,
                  sympy_expr=None,
                  ancillae_state=None,
-                 initial_values=None):
+                 initial_values=None,
+                 target_gate=None):
         # Initialize `QubitNetwork` parent
         super().__init__(num_qubits=num_qubits,
                          num_system_qubits=num_system_qubits,
@@ -253,7 +258,7 @@ class QubitNetworkModel(QubitNetwork):
         # the theano expression for the `fidelity`.
         self.inputs = T.dmatrix('inputs')
         self.outputs = T.dmatrix('outputs')
-        self.target_gate = None
+        self.target_gate = target_gate
 
     @staticmethod
     def _fidelities_with_ptrace(output_states, target_states, num_ancillae):
@@ -376,6 +381,52 @@ class QubitNetworkModel(QubitNetwork):
         target_outputs = target_outputs.reshape((num_states, len_outputs))
         return training_inputs, target_outputs
 
+    def fidelity_test(self, n_samples=10, return_mean=True):
+        """Compute fidelity with current interaction values with qutip.
+
+        This can be used to compute the fidelity avoiding the
+        compilation of the theano graph done by `self.fidelity`.
+
+        Raises
+        ------
+        TargetGateNotGivenError if not target gate has been specified.
+        """
+        # compute fidelity for case of no ancillae
+        if self.target_gate is None:
+            raise TargetGateNotGivenError('You must give a target gate'
+                                          ' first.')
+        target_gate = self.target_gate
+        gate = qutip.Qobj(self.get_current_gate(),
+                          dims=[[2] * self.num_qubits] * 2)
+        # each element of `fidelities` will contain the fidelity obtained with
+        # a single randomly generated input state
+        fidelities = np.zeros(n_samples)
+        for idx in range(fidelities.shape[0]):
+            # generate random input state (over system qubits only)
+            psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
+            psi_in.dims = [
+                [2] * self.num_system_qubits, [1] * self.num_system_qubits]
+            # embed it into the bigger system+ancilla space (if necessary)
+            if self.num_system_qubits < self.num_qubits:
+                Psi_in = qutip.tensor(psi_in, self.ancillae_state)
+            else:
+                Psi_in = psi_in
+            # evolve input state
+            Psi_out = gate * Psi_in
+            # trace out ancilla (if there is an ancilla to trace)
+            if self.num_system_qubits < self.num_qubits:
+                dm_out = Psi_out.ptrace(range(self.num_system_qubits))
+            else:
+                dm_out = qutip.ket2dm(Psi_out)
+            # compute fidelity
+            fidelity = (psi_in.dag() * target_gate.dag() *
+                        dm_out * target_gate * psi_in)
+            fidelities[idx] = fidelity[0, 0].real
+        if return_mean:
+            return fidelities.mean()
+        else:
+            return fidelities
+
     def fidelity(self, return_mean=True):
         """Return theano graph for fidelity given training states.
 
@@ -483,6 +534,20 @@ class QubitNetworkModel(QubitNetwork):
         theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
         # from IPython.core.debugger import set_trace; set_trace()
         return [parameters, theano_graph]
+
+    def get_current_hamiltonian(self):
+        ints_values = self.parameters.get_value()
+        matrices = [np.asarray(matrix).astype(np.complex)
+                    for matrix in self.matrices]
+        final_matrix = np.zeros_like(matrices[0])
+        for matrix, parameter in zip(matrices, ints_values):
+            final_matrix += parameter * matrix
+        return final_matrix
+
+    def get_current_gate(self):
+        """Return the gate implemented by current interaction values."""
+        return scipy.linalg.expm(-1j * self.get_current_hamiltonian())
+
 
 class Optimizer:
     """

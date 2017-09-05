@@ -125,19 +125,6 @@ class QubitNetwork(QubitNetworkHamiltonian):
                 self.J.set_value(Js)
                 del self.net_topology_symbols[symbols.index(symbol)]
 
-    def get_current_gate(self, return_qobj=True, chop_eps=None):
-        """Returns the currently produced unitary, in complex form."""
-        gate = self.build_H_factors(symbolic_result=False)
-        gate = scipy.linalg.expm(gate)
-        gate = bigreal2complex(gate)
-        if chop_eps is not None:
-            gate = chop(gate, chop_eps)
-
-        if return_qobj:
-            return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
-        else:
-            return gate
-
     def get_grouped_interactions(self):
         """
         Return list of interactions, taking the topology into account.
@@ -174,46 +161,6 @@ class QubitNetwork(QubitNetworkHamiltonian):
             outputs=self.fidelity(states, target_states)
         )
         return fidelity()
-
-    def test_fidelity_without_theano(self, target_gate=None, n_samples=10):
-        """
-        Computes the fidelity with random states, using only `qutip` functions.
-
-        This function can be used to double check the output given in the
-        optimization process. The whole computation is here done using
-        high level `qutip` functions.
-        """
-        gate = self.get_current_gate()
-        if target_gate is None:
-            if self.target_gate is None:
-                raise ValueError('No target gate has been specified')
-            else:
-                target_gate = self.target_gate
-        # each element of `fidelities` will contain the fidelity obtained with
-        # a single randomly generated input state
-        fidelities = np.zeros(n_samples)
-        for idx in range(fidelities.shape[0]):
-            # generate random input state (over system qubits only)
-            psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
-            psi_in.dims = [
-                [2] * self.num_system_qubits, [1] * self.num_system_qubits]
-            # embed it into the bigger system+ancilla space (if necessary)
-            if self.num_system_qubits < self.num_qubits:
-                Psi_in = qutip.tensor(psi_in, self.ancillae_state)
-            else:
-                Psi_in = psi_in
-            # evolve input state
-            Psi_out = gate * Psi_in
-            # trace out ancilla (if there is an ancilla to trace)
-            if self.num_system_qubits < self.num_qubits:
-                dm_out = Psi_out.ptrace(range(self.num_system_qubits))
-            else:
-                dm_out = qutip.ket2dm(Psi_out)
-            # compute fidelity
-            fidelity = (psi_in.dag() * target_gate.dag() *
-                        dm_out * target_gate * psi_in)
-            fidelities[idx] = fidelity[0, 0].real
-        return fidelities.mean()
 
 
     def net_parameters_to_dataframe(self, stringify_index=False):
