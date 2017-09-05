@@ -240,6 +240,7 @@ class QubitNetworkModel(QubitNetwork):
                  interactions=None,
                  net_topology=None,
                  sympy_expr=None,
+                 free_parameters_order=None,
                  ancillae_state=None,
                  initial_values=None,
                  target_gate=None):
@@ -249,7 +250,8 @@ class QubitNetworkModel(QubitNetwork):
                          interactions=interactions,
                          ancillae_state=ancillae_state,
                          net_topology=net_topology,
-                         sympy_expr=sympy_expr)
+                         sympy_expr=sympy_expr,
+                         free_parameters_order=free_parameters_order)
         # attributes initialization
         self.initial_values = self._set_initial_values(initial_values)
         self.parameters, self.hamiltonian_model = self.build_theano_graph()
@@ -564,7 +566,7 @@ class Optimizer:
                  sgd_method='momentum'):
         # the net parameter can be a QubitNetwork object or a str
         self.net = Optimizer._load_net(net)
-        self.target_gate = target_gate
+        self.net.target_gate = target_gate
         self.hyperpars = dict(
             train_dataset_size=training_dataset_size,
             test_dataset_size=test_dataset_size,
@@ -625,10 +627,12 @@ class Optimizer:
             num_system_qubits = num_qubits
         else:
             raise NotImplementedError('WIP')
-        net = QubitNetwork(num_qubits=num_qubits,
-                           num_system_qubits=num_system_qubits,
-                           sympy_expr=net_data['sympy_model'],
-                           initial_values=opt_data['initial_interactions'])
+        net = QubitNetworkModel(
+            num_qubits=num_qubits,
+            num_system_qubits=num_system_qubits,
+            free_parameters_order=net_data['free_parameters'],
+            sympy_expr=net_data['sympy_model'],
+            initial_values=opt_data['final_interactions'])
         # call __init__ to create `Optimizer` instance
         hyperpars = opt_data['hyperparameters']
         optimizer = cls(
@@ -682,10 +686,11 @@ class Optimizer:
         """
         net_data = dict(
             sympy_model=self.net.get_matrix(),
+            free_parameters=self.net.free_parameters,
             ancillae_state=self.net.ancillae_state
         )
         optimization_data = dict(
-            target_gate=self.target_gate,
+            target_gate=self.net.target_gate,
             hyperparameters=self.hyperpars,
             initial_interactions=self.net.initial_values,
             final_interactions=self._get_meaningful_history()['parameters'][-1]

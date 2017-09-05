@@ -36,7 +36,8 @@ class QubitNetwork(QubitNetworkHamiltonian):
                  interactions=None,
                  ancillae_state=None,
                  net_topology=None,
-                 sympy_expr=None):
+                 sympy_expr=None,
+                 free_parameters_order=None):
         # parameters initialization
         self.ancillae_state = None  # initial values for ancillae (if any)
 
@@ -45,7 +46,8 @@ class QubitNetwork(QubitNetworkHamiltonian):
         super().__init__(num_qubits=num_qubits,
                          expr=sympy_expr,
                          interactions=interactions,
-                         net_topology=net_topology)
+                         net_topology=net_topology,
+                         free_parameters_order=free_parameters_order)
         # Build the initial state of the ancillae, if there are any
         if num_system_qubits is None:
             self.num_system_qubits = self.num_qubits

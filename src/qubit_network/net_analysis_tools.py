@@ -15,6 +15,7 @@ import cufflinks
 import qutip
 
 from .QubitNetwork import QubitNetwork
+from .model import QubitNetworkModel
 from .utils import chop
 
 
@@ -398,6 +399,7 @@ class NetDataFile:
         self.ext = self.ext[1:]
         # the actual `QubitNetwork` object is only loaded when required
         self._data = None
+        self._net = None
 
     def __repr__(self):
         return self.name + ' (' + self.ext + ')'
@@ -428,11 +430,47 @@ class NetDataFile:
     @property
     def data(self):
         """
-        The actual `QubitNetwork` object, loaded from file on demand.
+        The dict stored in file, loaded on demand.
         """
         if self._data is None:
             self._load()
         return self._data
+
+    def _load_net_old(self):
+        """Rebuild QubitNetworkModel from old style saved data."""
+        data = self.data
+        topology = data.get('net_topology', None)
+        interactions = data.get('interactions', None)
+        ints_values = data.get('J')
+        net = QubitNetworkModel(
+            num_qubits=data['num_qubits'],
+            num_system_qubits=data['num_system_qubits'],
+            interactions=interactions,
+            net_topology=topology,
+            target_gate=data['target_gate'],
+            initial_values=ints_values)
+        return net
+
+    @property
+    def net(self):
+        """The QubitNetworkModel correponding to the file."""
+        if self._net is not None:
+            return self._net
+        # otherwise rebuild `QubitNetworkModel` from `self.data`
+        # pass the ball to _get_fidelity_old for old style saved nets
+        if 'J' in self.data:
+            self._net = self._load_net_old()
+            return self._net
+        # otherwise we can just use `sympy_model`:
+        sympy_model = self.data['net_data']['sympy_model']
+        opt_data = self.data['optimization_data']
+        interaction_values = opt_data['final_interactions']
+        target_gate = opt_data['target_gate']
+        net = QubitNetworkModel(sympy_expr=sympy_model,
+                                initial_values=interaction_values,
+                                target_gate=target_gate)
+        self._net = net
+        return self._net
 
     def _get_interactions_old_style(self):
         data = self.data
@@ -475,22 +513,11 @@ class NetDataFile:
             'value': values
         })
 
-    def _get_fidelity_old(self):
-        """Retrieve fidelity for old-style saved nets."""
-        data = self.data
-        topology = data.get('net_topology', None)
-        interactions = data.get('interactions', None)
-        ints_values = data.get('J')
-        net = QubitNetwork(
-            num_qubits=data['num_qubits'],
-            num_system_qubits=data['num_system_qubits'],
-            interactions=interactions,
-            net_topology=topology)
-
     @property
     def fidelity(self):
         """The trained fidelity."""
-
+        from IPython.core.debugger import set_trace; set_trace()
+        return net.fidelity_test(n_samples=100)
 
 
 class NetsDataFolder:

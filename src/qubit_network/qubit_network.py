@@ -19,7 +19,7 @@ import theano.tensor as T
 # package imports
 from .QubitNetwork import QubitNetwork
 from .net_analysis_tools import load_network_from_file
-from .model import FidelityGraph, _gradient_updates_momentum, Optimizer
+from .model import _gradient_updates_momentum, Optimizer
 from IPython.core.debugger import set_trace
 
 

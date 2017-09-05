@@ -99,6 +99,7 @@ class QubitNetworkHamiltonian:
     def __init__(self,
                  num_qubits=None,
                  expr=None,
+                 free_parameters_order=None,
                  interactions=None,
                  net_topology=None):
         # initialize class attributes
@@ -111,7 +112,7 @@ class QubitNetworkHamiltonian:
         # Extract lists of parameters and matrices to which each is to
         # be multiplied
         if expr is not None:
-            self._parse_sympy_expr(expr)
+            self._parse_sympy_expr(expr, free_parameters_order)
         elif interactions is not None:
             self._parse_from_interactions(num_qubits, interactions)
         elif net_topology is not None:
@@ -120,12 +121,15 @@ class QubitNetworkHamiltonian:
             raise ValueError('One of `expr`, `interactions` or '
                              '`net_topology` must be given.')
 
-    def _parse_sympy_expr(self, expr):
+    def _parse_sympy_expr(self, expr, free_parameters_order=None):
         """
         Extract free parameters and matrix coefficients from sympy expr.
         """
         try:
-            self.free_parameters = list(expr.free_symbols)
+            if free_parameters_order is not None:
+                self.free_parameters = free_parameters_order
+            else:
+                self.free_parameters = list(expr.free_symbols)
             _len = expr.shape[0]
         except TypeError:
             raise TypeError('`expr` must be a sympy MatrixSymbol object.')
