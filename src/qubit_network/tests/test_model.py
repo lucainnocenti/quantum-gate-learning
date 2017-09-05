@@ -16,20 +16,20 @@ import theano.tensor as T
 
 class TestFidelityGraph(unittest.TestCase):
     def test_evolution_matrix_x1_xx(self):
+        # build simple hamiltonian
         a, b = sympy.symbols('a, b')
         x1 = pauli_product(1, 0)
         xx = pauli_product(1, 1)
         expr = a * x1 + b * xx
-        net = QubitNetwork(sympy_expr=expr, initial_values=0)
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), None)
-        compute_evolution = theano.function(
-            [], model.compute_evolution_matrix())
+        # make model with initially 0 values for interactions
+        net = QubitNetworkModel(sympy_expr=expr, initial_values=0)
+        compute_evolution = theano.function([], net.compute_evolution_matrix())
         # check that if all parameters are zero evolution is the identity
         assert_array_equal(compute_evolution(), np.identity(8))
-        # try with a=1, b=0
+        # set a=1, b=0
         newJ = [0, 0]
         newJ[net.free_parameters.index(a)] = 1
-        model.parameters.set_value(newJ)
+        net.parameters.set_value(newJ)
         new_evolution = complex2bigreal(
             scipy.linalg.expm(-1j * np.asarray(x1).astype(np.complex)))
         assert_almost_equal(compute_evolution(), new_evolution)
@@ -37,7 +37,7 @@ class TestFidelityGraph(unittest.TestCase):
         newJ = [0, 0]
         newJ[net.free_parameters.index(a)] = 1.3
         newJ[net.free_parameters.index(b)] = -3
-        model.parameters.set_value(newJ)
+        net.parameters.set_value(newJ)
         new_evolution = complex2bigreal(scipy.linalg.expm(
             -1j * np.asarray(1.3 * x1 - 3 * xx).astype(np.complex)))
         assert_almost_equal(compute_evolution(), new_evolution)
@@ -55,18 +55,18 @@ class TestFidelityGraph(unittest.TestCase):
             scipy.linalg.expm(-1j * some_hamiltonian.data.toarray()),
             dims=[[2] * 2] * 2)
         # make net with random initial values
-        net = QubitNetwork(sympy_expr=expr)
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), some_target_gate)
+        net = QubitNetworkModel(sympy_expr=expr)
+        net.target_gate = some_target_gate
         # make training data (this uses the target gate not the current one)
-        inputs, outputs = model.generate_training_states(4)
+        inputs, outputs = net.generate_training_states(4)
         # set the parameters in the hamiltonian to the correct values
         newJ = [0, 0]
         newJ[net.free_parameters.index(J33)] = 1.
         newJ[net.free_parameters.index(J20)] = 1.3
-        model.parameters.set_value(newJ)
+        net.parameters.set_value(newJ)
         # compute evolution matrix with current (randomly generated) parameters
         evolution_matrix = theano.function([],
-                                           model.compute_evolution_matrix())()
+                                           net.compute_evolution_matrix())()
         # check evolution matrix
         assert_almost_equal(
             bigreal2complex(evolution_matrix),
@@ -79,12 +79,12 @@ class TestFidelityGraph(unittest.TestCase):
         y1 = pauli_product(2, 0)
         zz = pauli_product(3, 3)
         expr = J20 * y1 + J33 * zz
-        net = QubitNetwork(sympy_expr=expr)
+        net = QubitNetworkModel(sympy_expr=expr)
         zz_as_gate = qutip.Qobj(zz.tolist(), dims=[[2] * 2] * 2)
         y1_as_gate = qutip.Qobj(y1.tolist(), dims=[[2] * 2] * 2)
-        some_gate = zz_as_gate + 1.3 * y1_as_gate
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), some_gate)
-        inputs, outputs = model.generate_training_states(6)
+        target_gate = zz_as_gate + 1.3 * y1_as_gate
+        net.target_gate = target_gate
+        inputs, outputs = net.generate_training_states(6)
         self.assertEqual(inputs.shape[0], 6)
         self.assertEqual(outputs.shape[0], 6)
         self.assertEqual(inputs.shape[1], 2 * 2**2)
@@ -93,7 +93,7 @@ class TestFidelityGraph(unittest.TestCase):
             input_ = qutip.Qobj(bigreal2complex(input_), dims=qutip_dims)
             output = qutip.Qobj(bigreal2complex(output), dims=qutip_dims)
             assert_almost_equal(
-                (some_gate * input_).data.toarray(),
+                (target_gate * input_).data.toarray(),
                 output.data.toarray()
             )
 
@@ -113,25 +113,24 @@ class TestFidelityGraph(unittest.TestCase):
         assert_almost_equal(fidelity_np, fidelity_theano)
 
     def test_fidelities_no_ptrace_identity(self):
-        net = QubitNetwork(num_qubits=2, interactions='all', initial_values=0)
+        net = QubitNetworkModel(
+            num_qubits=2, interactions='all', initial_values=0)
         # target_gate set to qutip.qeye, so each state is its own target
-        model = FidelityGraph(
-            2, 2, *net.build_theano_graph(), qutip.qeye([2, 2]))
-        inputs, outputs = model.generate_training_states(10)
-        fidelities = FidelityGraph._fidelities_no_ptrace(model.inputs,
-                                                         model.outputs)
+        net.target_gate = qutip.qeye([2, 2])
+        inputs, outputs = net.generate_training_states(10)
+        fidelities = net._fidelities_no_ptrace(net.inputs, net.outputs)
         compute_fidelities = theano.function([], fidelities, givens={
-            model.inputs: inputs, model.outputs: outputs})
+            net.inputs: inputs, net.outputs: outputs})
         assert_almost_equal(compute_fidelities(), np.ones(len(inputs)))
 
     def test_fidelity_no_ptrace_identity(self):
-        net = QubitNetwork(num_qubits=2, interactions='all', initial_values=0)
+        net = QubitNetworkModel(
+            num_qubits=2, interactions='all', initial_values=0)
         # target_gate set to qutip.qeye, so each state is its own target
-        model = FidelityGraph(
-            2, 2, *net.build_theano_graph(), qutip.qeye([2, 2]))
-        inputs, outputs = model.generate_training_states(4)
-        fidelity = theano.function([], model.fidelity(), givens={
-            model.inputs: inputs, model.outputs: outputs})()
+        net.target_gate = qutip.qeye([2, 2])
+        inputs, outputs = net.generate_training_states(4)
+        fidelity = theano.function([], net.fidelity(), givens={
+            net.inputs: inputs, net.outputs: outputs})()
         assert_almost_equal(fidelity, np.array(1))
     
     def test_fidelity_no_ptrace_y1_zz(self):
@@ -139,22 +138,21 @@ class TestFidelityGraph(unittest.TestCase):
         y1 = pauli_product(2, 0)
         zz = pauli_product(3, 3)
         expr = J20 * y1 + J33 * zz
-        # parameters initialied at random values
-        net = QubitNetwork(sympy_expr=expr)
         # make gate
         zz_as_gate = qutip.Qobj(zz.tolist(), dims=[[2] * 2] * 2)
         y1_as_gate = qutip.Qobj(y1.tolist(), dims=[[2] * 2] * 2)
-        some_gate = zz_as_gate + 1.3 * y1_as_gate
-        # create model
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), some_gate)
+        target_gate = zz_as_gate + 1.3 * y1_as_gate
+        # create model, parameters initialied at random values
+        net = QubitNetworkModel(sympy_expr=expr)
+        net.target_gate = target_gate
         # make random inputs and corresponding target outputs
-        inputs, outputs = model.generate_training_states(10)
+        inputs, outputs = net.generate_training_states(10)
         # compute fidelity from theano functions to test
-        fidelities = theano.function([], model.fidelity(return_mean=False),
-            givens={model.inputs: inputs, model.outputs: outputs})()
+        fidelities = theano.function([], net.fidelity(return_mean=False),
+            givens={net.inputs: inputs, net.outputs: outputs})()
         # extract evolution matrix for given parameters
         evolution_matrix = theano.function(
-            [], model.compute_evolution_matrix())()
+            [], net.compute_evolution_matrix())()
         evolution_matrix = bigreal2qobj(evolution_matrix)
         # make inputs and outputs into qutip objects, easier to handle
         inputs = [bigreal2qobj(input_) for input_ in inputs]
@@ -176,18 +174,17 @@ class TestFidelityGraph(unittest.TestCase):
     def test_grad_evolution(self):
         J00, J11 = sympy.symbols('J00 J11')
         hamiltonian = J00 * pauli_product(0, 0) + J11 * pauli_product(1, 1)
-        net = QubitNetwork(num_qubits=2, sympy_expr=hamiltonian)
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), None)
-        unitary_evolution = model.compute_evolution_matrix()
-        grads_matrix = theano_matrix_grad(unitary_evolution, model.parameters)
+        net = QubitNetworkModel(sympy_expr=hamiltonian)
+        unitary_evolution = net.compute_evolution_matrix()
+        grads_matrix = theano_matrix_grad(unitary_evolution, net.parameters)
         compute_grads = theano.function([], grads_matrix)
         args = [1, 1.1]
-        model.parameters.set_value(args)
+        net.parameters.set_value(args)
         grads0, grads1 = compute_grads()
         # manual gradient
         _compute_evol = theano.function([], unitary_evolution)
         def compute_evol(*args):
-            model.parameters.set_value([*args])
+            net.parameters.set_value([*args])
             return _compute_evol()
         eps = 0.00000001
         manual_grad0 = (compute_evol(args[0] + eps, args[1]) - compute_evol(
@@ -201,20 +198,17 @@ class TestOptimizer(unittest.TestCase):
         J00, J11 = sympy.symbols('J00 J11')
         hamiltonian_model = pauli_product(0, 0) * J00 + pauli_product(1, 1) * J11
         target_gate = qutip.Qobj(pauli_product(1, 1).tolist(), dims=[[2] * 2] * 2)
-        net = QubitNetwork(
-            num_qubits=2,
-            sympy_expr=hamiltonian_model
-        )
-        model = FidelityGraph(2, 2, *net.build_theano_graph(), target_gate)
-        optimizer = Optimizer(model, 1, 10, 10)
+        net = QubitNetworkModel(sympy_expr=hamiltonian_model)
+        net.target_gate = target_gate
+        optimizer = Optimizer(net)
         # set parameters to have evolution implement XX gate
         new_parameters = [0, 0]
         new_parameters[net.free_parameters.index(J11)] = np.pi / 2
-        optimizer.model.parameters.set_value(new_parameters)
+        optimizer.net.parameters.set_value(new_parameters)
         # check via optimizer.cost that |00> goes to |11>
         fidelity = theano.function([], optimizer.cost, givens={
-            model.inputs: complex2bigreal([1, 0, 0, 0]).reshape((1, 8)),
-            model.outputs: complex2bigreal([0, 0, 0, 1]).reshape((1, 8))
+            net.inputs: complex2bigreal([1, 0, 0, 0]).reshape((1, 8)),
+            net.outputs: complex2bigreal([0, 0, 0, 1]).reshape((1, 8))
         })()
         assert_almost_equal(fidelity, np.array(1))
 
@@ -228,7 +222,7 @@ if __name__ == '__main__':
     sys.path.insert(1, PARENTDIR)
     from qubit_network.QubitNetwork import QubitNetwork
     from qubit_network.hamiltonian import pauli_product
-    from qubit_network.model import (FidelityGraph, Optimizer,
+    from qubit_network.model import (QubitNetworkModel, Optimizer,
                                      _fidelity_no_ptrace)
     from qubit_network.utils import (bigreal2complex, complex2bigreal,
                                      bigreal2qobj, theano_matrix_grad)
