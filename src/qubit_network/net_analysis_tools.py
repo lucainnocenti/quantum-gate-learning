@@ -640,7 +640,7 @@ class NetsDataFolder:
             data = pd.concat((data, new_df), axis=1)
         return data
 
-    def plot_parameters(self, joined=True, hlines=None):
+    def plot_parameters(self, joined=True, hlines=None, return_fig=False):
         """
         Plot an overlay scatter plot of all the nets.
         """
@@ -667,5 +667,7 @@ class NetsDataFolder:
         fig.layout.shapes = hline(0, len(data) - 1,
                                   hlines, dash='dash')
         # finally draw the damn thing
+        if return_fig:
+            return fig
         import plotly.offline
         plotly.offline.iplot(fig)

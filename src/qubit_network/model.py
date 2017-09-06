@@ -740,14 +740,14 @@ class Optimizer:
         n_epoch = self.log['n_epoch']
         fids = self.log['fidelities']
         if len_shown_history is None:
-            ax.plot(fids[:n_epoch], '-b')
+            ax.plot(fids[:n_epoch], '-b', linewidth=1)
         else:
             if n_epoch + 1 == len_shown_history:
                 x_coords = np.arange(
                     n_epoch - len_shown_history + 1, n_epoch + 1)
             else:
                 x_coords = np.arange(n_epoch + 1)
-            ax.plot(x_coords, fids[x_coords], '-b')
+            ax.plot(x_coords, fids[x_coords], '-b', linewidth=1)
         plt.suptitle('learning rate: {}\nfidelity: {}'.format(
             self.vars['learning_rate'].get_value(), fids[n_epoch]))
         fig.canvas.draw()
@@ -869,15 +869,14 @@ class Optimizer:
         if save_after is not None:
             self._save_results()
 
-    def plot_parameters_history(self, return_fig=False, return_df=False):
+    def plot_parameters_history(self, return_fig=False, return_df=False,
+                                online=False):
         import cufflinks
-        cufflinks.go_offline()
         names = [par.name for par in self.net.free_parameters]
         df = pd.DataFrame(self._get_meaningful_history()['parameters'])
         new_col_names = dict(zip(range(df.shape[1]), names))
         df.rename(columns=new_col_names, inplace=True)
         if return_df:
             return df
-        if return_fig:
-            return df.iplot(asFigure=True)
-        df.iplot()
+
+        return df.iplot(asFigure=return_fig, online=online)
