@@ -61,18 +61,19 @@ ccHadamard = (qutip.tensor(qutip.projection(2, 0, 0), qutip.qeye(2), qutip.qeye(
 Generating code, also found in [toffoli_only_diagonal_from_reduced_expression.ipynb](toffoli_only_diagonal_from_reduced_expression.ipynb) ([view on nbviewer](https://nbviewer.jupyter.org/github/lucainnocenti/quantum-gate-learning/blob/0879f34de99ffc55dcc344c198e7c1e3c64c699a/notebooks/toffoli_only_diagonal_from_reduced_expression.ipynb)):
 
     def J(*args):
-        return sympy.Symbol('J' + ''.join(str(arg) for arg in args))
+    return sympy.Symbol('J' + ''.join(str(arg) for arg in args))
     def pauli(*args):
-        return pauli_product(*args)
-    toffoli_diagonal = J(3, 0, 0) * (pauli(3, 0, 0) + pauli(0, 3, 0))
+    return pauli_product(*args)
+    toffoli_diagonal = J(3, 0, 0) * pauli(3, 0, 0)
+    toffoli_diagonal += J(0, 3, 0) * pauli(0, 3, 0)
     toffoli_diagonal += J(0, 0, 1) * pauli(0, 0, 1)
-    toffoli_diagonal += J(0, 3, 3) * (2 * pauli(0, 0, 3) + pauli(0, 3, 3) + pauli(3, 0, 3))
-    toffoli_diagonal += J(1, 0, 1) * (pauli(1, 0, 0) + pauli(0, 1, 0)) * (pauli(0, 0, 0) + pauli(0, 0, 1))
+    toffoli_diagonal += J(3, 0, 3) * (pauli(0, 0, 3) + pauli(3, 0, 3))
+    toffoli_diagonal += J(0, 3, 3) * (pauli(0, 0, 3) + pauli(0, 3, 3))
+    toffoli_diagonal += (J(1, 0, 1) * pauli(1, 0, 0) + J(0, 1, 1) * pauli(0, 1, 0)) * (pauli(0, 0, 0) + pauli(0, 0, 1))
     toffoli_diagonal += J(2, 2, 0) * (pauli(1, 1, 0) + pauli(2, 2, 0))
     toffoli_diagonal += J(3, 3, 0) * pauli(3, 3, 0)
-    toffoli_diagonal_symmetric = toffoli_diagonal
+    toffoli_diagonal
 
-    plt.style.use('ggplot')
     net = QubitNetworkModel(sympy_expr=toffoli_diagonal, initial_values=1)
     optimizer = Optimizer(
         net=net,
