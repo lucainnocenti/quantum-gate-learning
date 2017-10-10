@@ -1,3 +1,11 @@
+# Guide to notebooks
+
+- [fredkin_paper.ipynb](./fredkin_paper.ipynb): Notebook with reproduction of results of [Banchi et al.](http://localhost:8888/notebooks/fredkin_paper.ipynb).
+The training functions as used here may be obsolete and not running with the current version of the code.
+- [toffoli_only_diagonal_from_reduced_expression.ipynb](./toffoli_only_diagonal_from_reduced_expression.ipynb): Contains the code used to train the model for the Toffoli gate with only diagonal pairwise interactions, starting from the reduced expression given by the conditions in the paper. This is also where the plots for the Toffoli in the paper have been generated.
+
+
+# Results stored in net files
 ## 3-qubit gates without ancillae, all interactions
 
 All of the following nets have been successfully trained with the following code (appropriately changing the `target_gate` parameter):
