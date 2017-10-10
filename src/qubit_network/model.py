@@ -101,7 +101,9 @@ def _ket_to_dm(ket):
     The outputs are real and imaginary part of the corresponding density
     matrix.
     """
-    ket_real, ket_imag = _split_bigreal_ket(ket)[:, None]
+    ket_real, ket_imag = _split_bigreal_ket(ket)
+    ket_real = ket_real[:, None]
+    ket_imag = ket_imag[:, None]
 
     dm_real = ket_real * ket_real.T + ket_imag * ket_imag.T
     dm_imag = ket_imag * ket_real.T - ket_real * ket_imag.T
@@ -355,7 +357,7 @@ class QubitNetworkModel(QubitNetwork):
         assert self.target_gate is not None, 'target_gate not set'
 
         # 1) Generate random input states over system qubits
-        # `rand_ket_haar` seems to be sligtly faster than `rand_ket`
+        # `rand_ket_haar` seems to be slightly faster than `rand_ket`
         length_inputs = 2 ** self.num_system_qubits
         qutip_dims = [[2 for _ in range(self.num_system_qubits)],
                       [1 for _ in range(self.num_system_qubits)]]

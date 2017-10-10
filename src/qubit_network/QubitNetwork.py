@@ -40,6 +40,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
                  free_parameters_order=None):
         # parameters initialization
         self.ancillae_state = None  # initial values for ancillae (if any)
+        self.num_system_qubits = None  # number of input/output qubits
 
         # Initialize QubitNetworkHamiltonian parent. This computes
         # `self.matrices` and `self.free_parameters`.
@@ -54,17 +55,21 @@ class QubitNetwork(QubitNetworkHamiltonian):
         else:
             self.num_system_qubits = num_system_qubits
         if self.num_system_qubits < self.num_qubits:
-            self._initialize_ancillae(ancillae_state)        
+            self._initialize_ancillae(ancillae_state)
 
     def _initialize_ancillae(self, ancillae_state):
-        """Returns an initial ancilla state, as a qutip.Qobj object.
+        """Initialize ancillae states, as a qutip.Qobj object.
 
-        The generated state has every ancillary qubit in the up state.
+        The generated state has every ancillary qubit in the 0 state,
+        unless otherwise specified.
         """
-        raise NotImplementedError('To be done.')
+        num_ancillae = self.num_qubits - self.num_system_qubits
+        if ancillae_state is not None:
+            raise NotImplementedError('Custom specification of ancillae'
+                                      ' state not implemented.')
         state = qutip.tensor([qutip.basis(2, 0)
-                              for _ in range(self.num_ancillae)])
-        return state
+                              for _ in range(num_ancillae)])
+        self.ancillae_state = state
 
     def J_index_to_interaction(self, index):
         """
@@ -181,6 +186,13 @@ class QubitNetwork(QubitNetworkHamiltonian):
         A `pandas.DataFrame` with the interaction parameters ordered by
         qubits on which they act and type (interaction direction).
         """
+        interactions, values = self.free_parameters, self.parameters.get_value()
+        # now put everything in dataframe
+        return pd.DataFrame({
+            'interaction': interactions,
+            'value': values
+        }).set_index('interaction')
+        # OLD STUFF, POSSIBLY OBSOLETE
         parameters = self.get_interactions_with_Js()
         qubits = []
         directions = []
@@ -208,16 +220,19 @@ class QubitNetwork(QubitNetworkHamiltonian):
                             asFigure=False, **kwargs):
         """Plot the current values of the parameters of the network."""
         import cufflinks
+        import plotly
         df = self.net_parameters_to_dataframe()
+        # stringify index (otherwise error is thrown by plotly)
+        df.index = df.index.map(str)
         # optionally sort the index, grouping together self-interactions
-        if sort_index:
-            def sorter(elem):
-                return len(elem[0][0])
-            sorted_data = sorted(list(df.iloc[:, 0].to_dict().items()),
-                                 key=sorter)
-            x, y = tuple(zip(*sorted_data))
-            df = pd.DataFrame({'x': x, 'y': y}).set_index('x')
-            df.index = df.index.map(str)
+        # if sort_index:
+        #     def sorter(elem):
+        #         return len(elem[0][0])
+        #     sorted_data = sorted(list(df.iloc[:, 0].to_dict().items()),
+        #                          key=sorter)
+        #     x, y = tuple(zip(*sorted_data))
+        #     df = pd.DataFrame({'x': x, 'y': y}).set_index('x')
+        #     df.index = df.index.map(str)
         # decide online/offline
         if plotly_online:
             cufflinks.go_online()
@@ -234,7 +249,7 @@ class QubitNetwork(QubitNetworkHamiltonian):
                        title='Values of parameters',
                        text=df.index.tolist(),
                        asFigure=True, **kwargs)
-        fig.layout.shapes = hline(0, len(self.interactions),
+        fig.layout.shapes = hline(0, len(self.free_parameters),
                                     overlay_hlines, dash='dash')
         fig.data[0].textposition = 'top'
         fig.data[0].textfont = dict(color='white', size=13)
