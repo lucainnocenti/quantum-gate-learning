@@ -17,70 +17,23 @@ from .QubitNetwork import QubitNetwork
 from .theano_qutils import TheanoQstates
 
 
-def _gradient_updates_momentum(params, grad, learning_rate, momentum):
-    """
-    Compute updates for gradient descent with momentum
-
-    Parameters
-    ----------
-    cost : theano.tensor.var.TensorVariable
-        Theano cost function to minimize
-    params : list of theano.tensor.var.TensorVariable
-        Parameters to compute gradient against
-    learning_rate : float
-        Gradient descent learning rate
-    momentum : float
-        Momentum parameter, should be at least 0 (standard gradient
-        descent) and less than 1
+def _random_input_states(num_states, num_qubits):
+    """Generate a bunch of random input ket states with qutip.
 
     Returns
     -------
-    updates : list
-        List of updates, one for each parameter
+    A list of `num_states` elements, with each element a `qutip.Qobj`
+    of shape `(2**num_qubits, 1)`.
     """
-    # Make sure momentum is a sane value
-    assert momentum < 1 and momentum >= 0
-    # List of update steps for each parameter
-    updates = []
-    if not isinstance(params, list):
-        params = [params]
-    # Just gradient descent on cost
-    for param in params:
-        # For each parameter, we'll create a previous_step shared variable.
-        # This variable keeps track of the parameter's update step
-        # across iterations. We initialize it to 0
-        previous_step = theano.shared(
-            param.get_value() * 0., broadcastable=param.broadcastable)
-        step = momentum * previous_step + learning_rate * grad
-        # Add an update to store the previous step value
-        updates.append((previous_step, step))
-        # Add an update to apply the gradient descent step to the
-        # parameter itself
-        updates.append((param, param + step))
-    return updates
-
-
-def _gradient_updates_adadelta(params, grads):
-    eps = 1e-6
-    rho = 0.95
-    # initialize needed shared variables
-    def shared_from_var(p):
-        return theano.shared(
-            p.get_value() * np.asarray(0, dtype=theano.config.floatX))
-    zgrads = shared_from_var(params)
-    rparams2 = shared_from_var(params)
-    rgrads2 = shared_from_var(params)
-
-    zgrads_update = (zgrads, grads)
-    rgrads2_update = (rgrads2, rho * rgrads2 + (1 - rho) * grads**2)
-
-    params_step = -T.sqrt(rparams2 + eps) / T.sqrt(rgrads2 + eps) * zgrads
-    rparams2_update = (rparams2, rho * rparams2 + (1 - rho) * params_step**2)
-    params_update = (params, params - params_step)
-
-    updates = (zgrads_update, rgrads2_update, rparams2_update, params_update)
-    return updates
-
+    # `rand_ket_haar` seems to be slightly faster than `rand_ket`
+    # The efficiency of this function can probably be dramatically improved.
+    length_inputs = 2 ** num_qubits
+    qutip_dims = [[2 for _ in range(num_qubits)],
+                  [1 for _ in range(num_qubits)]]
+    return [
+        qutip.rand_ket_haar(length_inputs, dims=qutip_dims)
+        for _ in range(num_states)
+    ]
 
 class TargetGateNotGivenError(Exception):
     pass
@@ -92,195 +45,77 @@ class QubitNetworkModel(QubitNetwork):
     Here we add the theano variables and functions to compute fidelity
     and so on.
     """
-    def __init__(self, num_qubits=None, num_system_qubits=None,
+    def __init__(self, num_qubits=None,
                  interactions=None,
                  net_topology=None,
                  sympy_expr=None,
                  free_parameters_order=None,
-                 ancillae_state=None,
-                 initial_values=None,
-                 target_gate=None):
+                 initial_values=None):
         # Initialize `QubitNetwork` parent
         super().__init__(num_qubits=num_qubits,
-                         num_system_qubits=num_system_qubits,
                          interactions=interactions,
-                         ancillae_state=ancillae_state,
                          net_topology=net_topology,
                          sympy_expr=sympy_expr,
                          free_parameters_order=free_parameters_order)
         # attributes initialization
         self.initial_values = self._set_initial_values(initial_values)
-        self.parameters, self.hamiltonian_model = self.build_theano_graph()
+        self.parameters, self.hamiltonian_model = self._build_theano_graph()
         # self.inputs and self.outputs are the holders for the training/testing
         # inputs and corresponding output states. They are used to build
         # the theano expression for the `fidelity`.
         self.inputs = T.dmatrix('inputs')
         self.outputs = T.dmatrix('outputs')
-        self.target_gate = target_gate
 
     def compute_evolution_matrix(self):
         """Compute matrix exponential of iH."""
         return T.slinalg.expm(self.hamiltonian_model)
 
-    def _target_outputs_from_inputs_open_map(self, input_states):
-        raise NotImplementedError('Not implemented yet')
-        # Note that in case of an open map target, all target states are
-        # density matrices, instead of just kets like they would when the
-        # target is a unitary gate.
-        target_states = []
-        for psi in input_states:
-            # the open evolution is implemented vectorizing density
-            # matrices and maps: `A * rho * B` becomes
-            # `unvec(vec(tensor(A, B.T)) * vec(rho))`.
-            vec_dm_ket = qutip.operator_to_vector(qutip.ket2dm(psi))
-            evolved_ket = self.target_gate * vec_dm_ket
-            evolved_ket = qutip.vector_to_operator(evolved_ket)
-            target_states.append(evolved_ket)
-        return target_states
-
-    def _target_outputs_from_inputs(self, input_states):
-        # defer operation to other method for open maps
-        if self.target_gate.issuper:
-            return self._target_outputs_from_inputs_open_map(input_states)
-        # unitary evolution of input states. `target_gate` is qutip obj
-        return [self.target_gate * psi for psi in input_states]
-
-    def generate_training_states(self, num_states):
-        """Create training states for the training.
-
-        This function generates every time it is called a set of
-        input and corresponding target output states, to be used during
-        training. These values will be used during the computation
-        through the `givens` parameter of `theano.function`.
-
-        Returns
-        -------
-        A tuple with two elements: training vectors and labels.
-        NOTE: The training and target vectors have different lengths!
-              The latter span the whole space while the former only the
-              system one.
-
-        training_states: an array of vectors.
-            Each vector represents a state in the full system+ancilla space,
-            in big real form. These states span the whole space simply
-            out of convenience, but are obtained as tensor product of
-            the target states over the system qubits with the initial
-            states of the ancillary qubits.
-        target_states: an array of vectors.
-            Each vector represents a state spanning only the system qubits,
-            in big real form. Every such state is generated by evolving
-            the corresponding `training_state` through the matrix
-            `target_unitary`.
-
-        This generation method is highly non-optimal. However, it takes
-        about ~250ms to generate a (standard) training set of 100 states,
-        which amounts to ~5 minutes over 1000 epochs with a training dataset
-        size of 100, making this factor not particularly important.
-        """
-        assert self.target_gate is not None, 'target_gate not set'
-
-        # 1) Generate random input states over system qubits
-        # `rand_ket_haar` seems to be slightly faster than `rand_ket`
-        length_inputs = 2 ** self.num_system_qubits
-        qutip_dims = [[2 for _ in range(self.num_system_qubits)],
-                      [1 for _ in range(self.num_system_qubits)]]
-        training_inputs = [
-            qutip.rand_ket_haar(length_inputs, dims=qutip_dims)
-            for _ in range(num_states)
-        ]
-        # 2) Compute corresponding output states
-        target_outputs = self._target_outputs_from_inputs(training_inputs)
-        # 3) Tensor product of training input states with ancillae
-        for idx, ket in enumerate(training_inputs):
-            if self.num_system_qubits < self.num_qubits:
-                ket = qutip.tensor(ket, self.ancillae_state)
-            training_inputs[idx] = complex2bigreal(ket)
+    def generate_training_states_decision_problem(self,
+                                                  num_states,
+                                                  num_qubits_input1,
+                                                  num_qubits_input2,
+                                                  num_qubits_answer,
+                                                  decision_fn=None,
+                                                  ancillae_state=None):
+        num_qubits_inputs = num_qubits_input1 + num_qubits_input2
+        # abort if there are not enough qubits in the whole network
+        if (num_qubits_inputs + num_qubits_answer > self.num_qubits):
+            raise ValueError('Not enough qubits in the network.')
+        # generate two random sets of input states
+        inputs1 = _random_input_states(num_states, num_qubits_input1)
+        inputs2 = _random_input_states(num_states, num_qubits_input2)
+        # `decision_fn` is the function computing the answer qubit state
+        # that we want to be associated with a given pair of inputs
+        if decision_fn is None:
+            def decision_fn(input1, input2):
+                if qutip.fidelity(input1, input2) > 0.8:
+                    return qutip.basis(2, 1)
+                else:
+                    return qutip.basis(2, 0)
+        if ancillae_state is None:
+            ancillae_state = qutip.basis(2, 0)
+        # initial state of answer qubits
+        answer_qubits_init = qutip.tensor(
+            *([qutip.basis(2, 0)] * num_qubits_answer))
+        # compute the states we want to be given in the answer qubit(s)
+        answers = [decision_fn(input1, input2)
+                   for input1, input2 in zip(inputs1, inputs2)]
+        # compute number of remaining qubits, to be used as ancillary (
+        # or "processor") qubits
+        num_ancillae = self.num_qubits - num_qubits_inputs - num_qubits_answer
+        ancillae_states = qutip.tensor(*([ancillae_state] * num_ancillae))
+        # complete input states with ancillae and convert to big real
+        training_inputs = []
+        training_outputs = []
+        for states in enumerate(zip(inputs1, inputs2, answers)):
+            input1, input2, answer = states
+            full_input = qutip.tensor(answer_qubits_init, input1, input2,
+                                      ancillae_states)
+            training_inputs.append(complex2bigreal(full_input))
+            training_outputs.append(complex2bigreal(answer))
         training_inputs = np.asarray(training_inputs)
-        # 4) Convert target outputs in big real form.
-        # NOTE: the target states are kets if the target gate is unitary,
-        #       and density matrices for target open maps.
-        target_outputs = np.asarray(
-            [complex2bigreal(st) for st in target_outputs])
-        # return results as matrices
-        _, len_inputs, _ = training_inputs.shape
-        _, len_outputs, _ = target_outputs.shape
-        training_inputs = training_inputs.reshape((num_states, len_inputs))
-        target_outputs = target_outputs.reshape((num_states, len_outputs))
-        return training_inputs, target_outputs
-
-    def fidelity_test(self, n_samples=10, return_mean=True):
-        """Compute fidelity with current interaction values with qutip.
-
-        This can be used to compute the fidelity avoiding the
-        compilation of the theano graph done by `self.fidelity`.
-
-        Raises
-        ------
-        TargetGateNotGivenError if not target gate has been specified.
-        """
-        # compute fidelity for case of no ancillae
-        if self.target_gate is None:
-            raise TargetGateNotGivenError('You must give a target gate'
-                                          ' first.')
-        target_gate = self.target_gate
-        gate = qutip.Qobj(self.get_current_gate(),
-                          dims=[[2] * self.num_qubits] * 2)
-        # each element of `fidelities` will contain the fidelity obtained with
-        # a single randomly generated input state
-        fidelities = np.zeros(n_samples)
-        for idx in range(fidelities.shape[0]):
-            # generate random input state (over system qubits only)
-            psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
-            psi_in.dims = [
-                [2] * self.num_system_qubits, [1] * self.num_system_qubits]
-            # embed it into the bigger system+ancilla space (if necessary)
-            if self.num_system_qubits < self.num_qubits:
-                Psi_in = qutip.tensor(psi_in, self.ancillae_state)
-            else:
-                Psi_in = psi_in
-            # evolve input state
-            Psi_out = gate * Psi_in
-            # trace out ancilla (if there is an ancilla to trace)
-            if self.num_system_qubits < self.num_qubits:
-                dm_out = Psi_out.ptrace(range(self.num_system_qubits))
-            else:
-                dm_out = qutip.ket2dm(Psi_out)
-            # compute fidelity
-            fidelity = (psi_in.dag() * target_gate.dag() *
-                        dm_out * target_gate * psi_in)
-            fidelities[idx] = fidelity[0, 0].real
-        if return_mean:
-            return fidelities.mean()
-        else:
-            return fidelities
-
-    def fidelity(self, return_mean=True):
-        """Return theano graph for fidelity given training states.
-
-        In the output theano expression `fidelities`, the tensors
-        `output_states` and `target_states` are left "hanging", and will
-        be replaced during the training through the `givens` parameter
-        of `theano.function`.
-        """
-        # `output_states` are the obtained output states, while
-        # `self.outputs` are the output states we want (the training ones).
-        states = TheanoQstates(self.inputs)
-        states.evolve_all_kets(self.compute_evolution_matrix())
-        num_ancillae = self.num_qubits - self.num_system_qubits
-        fidelities = states.fidelities(self.outputs, num_ancillae)
-        # output_states = T.tensordot(
-        #     self.compute_evolution_matrix(), self.inputs, axes=([1], [1])).T
-        # num_ancillae = self.num_qubits - self.num_system_qubits
-        # if num_ancillae > 0:
-        #     fidelities = self._fidelities_with_ptrace(
-        #         output_states, self.outputs, num_ancillae)
-        # else:
-        #     fidelities = self._fidelities_no_ptrace(output_states,
-        #                                             self.outputs)
-        if return_mean:
-            return T.mean(fidelities)
-        else:
-            return fidelities
+        training_outputs = np.asarray(training_outputs)
+        return training_inputs, training_outputs
 
     def _set_initial_values(self, values=None):
         """Set initial values for the parameters in the Hamiltonian.
@@ -343,12 +178,15 @@ class QubitNetworkModel(QubitNetwork):
             return [complex2bigreal(matrix).astype(np.float)
                     for matrix in self.matrices]
 
-    def build_theano_graph(self):
+    def _build_theano_graph(self):
         """Build theano object corresponding to the Hamiltonian model.
 
         The free parameters in the output graphs are taken from the sympy
         free symbols in the Hamiltonian, stored in `self.free_parameters`.
-
+        This is to be done regardless of what we need the network for
+        (that is, both if we want to traing it to act as a gate on a
+        subset of the qubits or to solve decision problems or whatever
+        else).
         Returns
         -------
         tuple with the shared theano variable representing the parameters
@@ -381,6 +219,307 @@ class QubitNetworkModel(QubitNetwork):
             final_matrix += parameter * matrix
         return final_matrix
 
+    def net_parameters_to_dataframe(self, stringify_index=False):
+        """
+        Take parameters from a QubitNetwork object and put it in DataFrame.
+
+        Parameters
+        ----------
+        stringify_index : bool
+            If True, instead of a MultiIndex the output DataFrame will have
+            a single index of strings, built applying `df.index.map(str)` to
+            the original index structure.
+
+        Returns
+        -------
+        A `pandas.DataFrame` with the interaction parameters ordered by
+        qubits on which they act and type (interaction direction).
+        """
+        interactions, values = self.free_parameters, self.parameters.get_value()
+        # now put everything in dataframe
+        return pd.DataFrame({
+            'interaction': interactions,
+            'value': values
+        }).set_index('interaction')
+        # OLD STUFF, POSSIBLY OBSOLETE
+        parameters = self.get_interactions_with_Js()
+        qubits = []
+        directions = []
+        values = []
+        for key, value in parameters.items():
+            try:
+                qubits.append(tuple(key[0]))
+            except TypeError:
+                qubits.append((key[0], ))
+            directions.append(key[1])
+            values.append(value)
+
+        pars_df = pd.DataFrame({
+            'qubits': qubits,
+            'directions': directions,
+            'values': values
+        }).set_index(['qubits', 'directions']).sort_index()
+        if stringify_index:
+            pars_df.index = pars_df.index.map(str)
+        return pars_df
+    
+    def plot_net_parameters(self, sort_index=True, plotly_online=False,
+                            mode='lines+markers+text',
+                            overlay_hlines=None,
+                            asFigure=False, **kwargs):
+        """Plot the current values of the parameters of the network."""
+        import cufflinks
+        import plotly
+        df = self.net_parameters_to_dataframe()
+        # stringify index (otherwise error is thrown by plotly)
+        df.index = df.index.map(str)
+        # optionally sort the index, grouping together self-interactions
+        # if sort_index:
+        #     def sorter(elem):
+        #         return len(elem[0][0])
+        #     sorted_data = sorted(list(df.iloc[:, 0].to_dict().items()),
+        #                          key=sorter)
+        #     x, y = tuple(zip(*sorted_data))
+        #     df = pd.DataFrame({'x': x, 'y': y}).set_index('x')
+        #     df.index = df.index.map(str)
+        # decide online/offline
+        if plotly_online:
+            cufflinks.go_online()
+        else:
+            cufflinks.go_offline()
+        # draw overlapping horizontal lines for reference if asked
+        if overlay_hlines is None:
+            overlay_hlines = np.arange(-np.pi, np.pi, np.pi / 2)
+            # return df.iplot(kind='scatter', mode=mode, size=6,
+            #                 title='Values of parameters',
+            #                 asFigure=asFigure, **kwargs)
+        from .plotly_utils import hline
+        fig = df.iplot(kind='scatter', mode=mode, size=6,
+                       title='Values of parameters',
+                       text=df.index.tolist(),
+                       asFigure=True, **kwargs)
+        fig.layout.shapes = hline(0, len(self.free_parameters),
+                                    overlay_hlines, dash='dash')
+        fig.data[0].textposition = 'top'
+        fig.data[0].textfont = dict(color='white', size=13)
+        if asFigure:
+            return fig
+        else:
+            return plotly.offline.iplot(fig)
+
+    def generate_training_states(self, *args):
+        """Generate training input/output pairs."""
+        raise NotImplementedError('Subclasses must override this method.')
+
+    def fidelity_test(self, *args):
+        """Test the fidelity function using a different method."""
+        raise NotImplementedError('Subclasses must override fidelity_test().')
+
+    def fidelity(self, *args):
+        """Compute the cost function of the model."""
+        raise NotImplementedError('Subclasses must override fidelity().')
+
+
+class QubitNetworkGateModel(QubitNetworkModel):
+    """Model to be used for training network to reproduce a gate.
+
+    This is the class to be used to train the network to reproduce a
+    target gate on a subset of the qubits (the "system" qubits).
+    """
+    # pylint: disable=W0221
+    def __init__(self, num_qubits=None, num_system_qubits=None,
+                 interactions=None,
+                 net_topology=None,
+                 sympy_expr=None,
+                 free_parameters_order=None,
+                 ancillae_state=None,
+                 initial_values=None,
+                 target_gate=None):
+        super().__init__(num_qubits=num_qubits,
+                         interactions=interactions,
+                         net_topology=net_topology,
+                         sympy_expr=sympy_expr,
+                         free_parameters_order=free_parameters_order)
+        # parameters initialization
+        self.ancillae_state = None  # initial values for ancillae (if any)
+        self.num_system_qubits = None  # number of input/output qubits
+        self.target_gate = target_gate
+        # Build the initial state of the ancillae, if there are any
+        if num_system_qubits is None:
+            self.num_system_qubits = self.num_qubits
+        else:
+            self.num_system_qubits = num_system_qubits
+        if self.num_system_qubits < self.num_qubits:
+            self._initialize_ancillae(ancillae_state)
+
+    def _initialize_ancillae(self, ancillae_state):
+        """Initialize ancillae states, as a qutip.Qobj object.
+
+        The generated state has every ancillary qubit in the 0 state,
+        unless otherwise specified.
+        """
+        num_ancillae = self.num_qubits - self.num_system_qubits
+        if ancillae_state is not None:
+            raise NotImplementedError('Custom specification of ancillae'
+                                      ' state not implemented yet.')
+        state = qutip.tensor([qutip.basis(2, 0)
+                              for _ in range(num_ancillae)])
+        self.ancillae_state = state
+
+    def _target_outputs_from_inputs_open_map(self, input_states):
+        raise NotImplementedError('Not implemented yet')
+        # Note that in case of an open map target, all target states are
+        # density matrices, instead of just kets like they would when the
+        # target is a unitary gate.
+        target_states = []
+        for psi in input_states:
+            # the open evolution is implemented vectorizing density
+            # matrices and maps: `A * rho * B` becomes
+            # `unvec(vec(tensor(A, B.T)) * vec(rho))`.
+            vec_dm_ket = qutip.operator_to_vector(qutip.ket2dm(psi))
+            evolved_ket = self.target_gate * vec_dm_ket
+            evolved_ket = qutip.vector_to_operator(evolved_ket)
+            target_states.append(evolved_ket)
+        return target_states
+
+    def _target_outputs_from_inputs(self, input_states):
+        # defer operation to other method for open maps
+        if self.target_gate.issuper:
+            return self._target_outputs_from_inputs_open_map(input_states)
+        # unitary evolution of input states. `target_gate` is qutip obj
+        return [self.target_gate * psi for psi in input_states]
+
+    def fidelity_test(self, n_samples=10, return_mean=True):
+        """Compute fidelity with current interaction values with qutip.
+
+        This can be used to compute the fidelity avoiding the
+        compilation of the theano graph done by `self.fidelity`.
+
+        Raises
+        ------
+        TargetGateNotGivenError if not target gate has been specified.
+        """
+        # compute fidelity for case of no ancillae
+        if self.target_gate is None:
+            raise TargetGateNotGivenError('You must give a target gate'
+                                          ' first.')
+        target_gate = self.target_gate
+        gate = qutip.Qobj(self.get_current_gate(),
+                          dims=[[2] * self.num_qubits] * 2)
+        # each element of `fidelities` will contain the fidelity obtained with
+        # a single randomly generated input state
+        fidelities = np.zeros(n_samples)
+        for idx in range(fidelities.shape[0]):
+            # generate random input state (over system qubits only)
+            psi_in = qutip.rand_ket_haar(2 ** self.num_system_qubits)
+            psi_in.dims = [
+                [2] * self.num_system_qubits, [1] * self.num_system_qubits]
+            # embed it into the bigger system+ancilla space (if necessary)
+            if self.num_system_qubits < self.num_qubits:
+                Psi_in = qutip.tensor(psi_in, self.ancillae_state)
+            else:
+                Psi_in = psi_in
+            # evolve input state
+            Psi_out = gate * Psi_in
+            # trace out ancilla (if there is an ancilla to trace)
+            if self.num_system_qubits < self.num_qubits:
+                dm_out = Psi_out.ptrace(range(self.num_system_qubits))
+            else:
+                dm_out = qutip.ket2dm(Psi_out)
+            # compute fidelity
+            fidelity = (psi_in.dag() * target_gate.dag() *
+                        dm_out * target_gate * psi_in)
+            fidelities[idx] = fidelity[0, 0].real
+        if return_mean:
+            return fidelities.mean()
+        else:
+            return fidelities
+
+    def fidelity(self, return_mean=True):
+        """Return theano graph for fidelity given training states.
+
+        In the output theano expression `fidelities`, the tensors
+        `output_states` and `target_states` are left "hanging", and will
+        be replaced during the training through the `givens` parameter
+        of `theano.function`.
+        """
+        # `output_states` are the obtained output states, while
+        # `self.outputs` are the output states we want (the training ones).
+        states = TheanoQstates(self.inputs)
+        states.evolve_all_kets(self.compute_evolution_matrix())
+        num_ancillae = self.num_qubits - self.num_system_qubits
+        fidelities = states.fidelities(self.outputs, num_ancillae)
+        if return_mean:
+            return T.mean(fidelities)
+        else:
+            return fidelities
+
+    def generate_training_states(self, num_states):
+        """Create training states for the training.
+
+        This function generates every time it is called a set of
+        input and corresponding target output states, to be used during
+        training. These values will be used during the computation
+        through the `givens` parameter of `theano.function`.
+
+        Returns
+        -------
+        A tuple with two elements: training vectors and labels.
+        NOTE: The training and target vectors have different lengths!
+              The former span the whole space while the latter only the
+              system one.
+
+        training_states: an array of vectors.
+            Each vector represents a state in the full system+ancilla space,
+            in big real form. These states span the whole space simply
+            out of convenience, but are obtained as tensor product of
+            the target states over the system qubits with the initial
+            states of the ancillary qubits.
+        target_states: an array of vectors.
+            Each vector represents a state spanning only the system qubits,
+            in big real form. Every such state is generated by evolving
+            the corresponding `training_state` through the matrix
+            `target_unitary`.
+
+        This generation method is highly non-optimal. However, it takes
+        about ~250ms to generate a (standard) training set of 100 states,
+        which amounts to ~5 minutes over 1000 epochs with a training dataset
+        size of 100, making this factor not particularly important.
+        """
+        if self.target_gate is None:
+            raise TargetGateNotGivenError('Target gate not set yet.')
+
+        # 1) Generate random input states over system qubits
+        # `rand_ket_haar` seems to be slightly faster than `rand_ket`
+        # length_inputs = 2 ** self.num_system_qubits
+        # qutip_dims = [[2 for _ in range(self.num_system_qubits)],
+        #               [1 for _ in range(self.num_system_qubits)]]
+        # training_inputs = [
+        #     qutip.rand_ket_haar(length_inputs, dims=qutip_dims)
+        #     for _ in range(num_states)
+        # ]
+        training_inputs = _random_input_states(num_states,
+                                               self.num_system_qubits)
+        # 2) Compute corresponding output states
+        target_outputs = self._target_outputs_from_inputs(training_inputs)
+        # 3) Tensor product of training input states with ancillae
+        for idx, ket in enumerate(training_inputs):
+            if self.num_system_qubits < self.num_qubits:
+                ket = qutip.tensor(ket, self.ancillae_state)
+            training_inputs[idx] = complex2bigreal(ket)
+        training_inputs = np.asarray(training_inputs)
+        # 4) Convert target outputs in big real form.
+        # NOTE: the target states are kets if the target gate is unitary,
+        #       and density matrices for target open maps.
+        target_outputs = np.asarray(
+            [complex2bigreal(st) for st in target_outputs])
+        # return results as matrices
+        _, len_inputs, _ = training_inputs.shape
+        _, len_outputs, _ = target_outputs.shape
+        training_inputs = training_inputs.reshape((num_states, len_inputs))
+        target_outputs = target_outputs.reshape((num_states, len_outputs))
+        return training_inputs, target_outputs
+
     def get_current_gate(self, return_qobj=True):
         """Return the gate implemented by current interaction values.
 
@@ -391,336 +530,3 @@ class QubitNetworkModel(QubitNetwork):
         if return_qobj:
             return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
         return gate
-
-
-class Optimizer:
-    """
-    Main object handling the optimization of a `QubitNetwork` instance.
-    """
-    # pylint: disable=too-many-instance-attributes
-    def __init__(self, net,
-                 learning_rate=None, decay_rate=None,
-                 training_dataset_size=10,
-                 test_dataset_size=10,
-                 batch_size=None,
-                 n_epochs=None,
-                 target_gate=None,
-                 sgd_method='momentum'):
-        # the net parameter can be a QubitNetwork object or a str
-        self.net = Optimizer._load_net(net)
-        self.net.target_gate = target_gate
-        self.hyperpars = dict(
-            train_dataset_size=training_dataset_size,
-            test_dataset_size=test_dataset_size,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            sgd_method=sgd_method,
-            initial_learning_rate=learning_rate,
-            decay_rate=decay_rate
-        )
-        # self.vars stores the shared variables for the computation
-        def _sharedfloat(arr, name):
-            return theano.shared(np.asarray(
-                arr, dtype=theano.config.floatX), name=name)
-        inputs_length = 2 * 2**self.net.num_qubits
-        outputs_length = 2 * 2**self.net.num_system_qubits
-        self.vars = dict(
-            index=T.lscalar('minibatch index'),
-            learning_rate=_sharedfloat(learning_rate, 'learning rate'),
-            train_inputs=_sharedfloat(
-                np.zeros((training_dataset_size, inputs_length)),
-                'training inputs'),
-            train_outputs=_sharedfloat(
-                np.zeros((training_dataset_size, outputs_length)),
-                'training outputs'),
-            test_inputs=_sharedfloat(
-                np.zeros((test_dataset_size, inputs_length)),
-                'test inputs'),
-            test_outputs=_sharedfloat(
-                np.zeros((test_dataset_size, outputs_length)),
-                'test outputs'),
-            parameters=self.net.parameters
-        )
-        self.cost = self.net.fidelity()
-        self.cost.name = 'mean fidelity'
-        self.grad = T.grad(cost=self.cost, wrt=self.vars['parameters'])
-        self.train_model = None  # to be assigned in `compile_model`
-        self.test_model = None  # assigned in `compile_model`
-        # define updates, to be performed at every call of `train_XXX`
-        self.updates = self._make_updates(sgd_method)
-        # initialize log to be filled with the history later
-        self.log = {'fidelities': None, 'parameters': None}
-        # create figure object
-        self._fig = None
-        self._ax = None
-
-    @classmethod
-    def load(cls, file):
-        """Load from saved file."""
-        import pickle
-        _, ext = os.path.splitext(file)
-        if ext != '.pickle':
-            raise NotImplementedError('Only pickle files for now!')
-        with open(file, 'rb') as f:
-            data = pickle.load(f)
-        net_data = data['net_data']
-        opt_data = data['optimization_data']
-        # create QubitNetwork instance
-        num_qubits = np.log2(net_data['sympy_model'].shape[0]).astype(int)
-        if net_data['ancillae_state'] is None:
-            num_system_qubits = num_qubits
-        else:
-            raise NotImplementedError('WIP')
-        net = QubitNetworkModel(
-            num_qubits=num_qubits,
-            num_system_qubits=num_system_qubits,
-            free_parameters_order=net_data['free_parameters'],
-            sympy_expr=net_data['sympy_model'],
-            initial_values=opt_data['final_interactions'])
-        # call __init__ to create `Optimizer` instance
-        hyperpars = opt_data['hyperparameters']
-        optimizer = cls(
-            net,
-            learning_rate=hyperpars['initial_learning_rate'],
-            decay_rate=hyperpars['decay_rate'],
-            training_dataset_size=hyperpars['train_dataset_size'],
-            test_dataset_size=hyperpars['test_dataset_size'],
-            batch_size=hyperpars['batch_size'],
-            n_epochs=hyperpars['n_epochs'],
-            sgd_method=hyperpars['sgd_method'],
-            target_gate=opt_data['target_gate'])
-        optimizer.log = opt_data['log']
-        return optimizer
-
-    @staticmethod
-    def _load_net(net):
-        """
-        Parse the `net` parameter given during init of `Optimizer`.
-        """
-        if isinstance(net, str):
-            raise NotImplementedError('To be reimplemented')
-        return net
-
-    def _get_meaningful_history(self):
-        fids = self.log['fidelities']
-        # we cut from the history the last contiguous block of
-        # values that are closer to 1 than `eps`
-        eps = 1e-10
-        try:
-            end_useful_log = np.diff(np.abs(1 - fids) < eps).nonzero()[0][-1]
-        # if the fidelity didn't converge to 1 the above raises an
-        # IndexError. We then look to remove all the trailing zeros
-        except IndexError:
-            try:
-                end_useful_log = np.diff(fids == 0).nonzero()[0][-1]
-            # if also the above doesn't work, we just return the whole thing
-            except IndexError:
-                end_useful_log = len(fids)
-        saved_log = dict()
-        saved_log['fidelities'] = fids[:end_useful_log]
-        if self.log['parameters'] is not None:
-            saved_log['parameters'] = self.log['parameters'][:end_useful_log]
-        return saved_log
-
-    def save_results(self, file):
-        """Save optimization results.
-
-        The idea is here to save all the information required to
-        reproduce a given training session.
-        """
-        net_data = dict(
-            sympy_model=self.net.get_matrix(),
-            free_parameters=self.net.free_parameters,
-            ancillae_state=self.net.ancillae_state
-        )
-        optimization_data = dict(
-            target_gate=self.net.target_gate,
-            hyperparameters=self.hyperpars,
-            initial_interactions=self.net.initial_values,
-            final_interactions=self._get_meaningful_history()['parameters'][-1]
-        )
-        # cut redundant log history
-        optimization_data['log'] = self._get_meaningful_history()
-        # prepare and finally save to file
-        data_to_save = dict(
-            net_data=net_data, optimization_data=optimization_data)
-        _, ext = os.path.splitext(file)
-        if ext == '.pickle':
-            import pickle
-            with open(file, 'wb') as fp:
-                pickle.dump(data_to_save, fp)
-            print('Successfully saved to {}'.format(file))
-        else:
-            raise ValueError('Only saving to pickle is supported.')
-
-
-    def _make_updates(self, sgd_method):
-        """Return updates, for `train_model` and `test_model`."""
-        assert isinstance(sgd_method, str)
-        # specify how to update the parameters of the model as a list of
-        # (variable, update expression) pairs
-        if sgd_method == 'momentum':
-            momentum = 0.5
-            learn_rate = self.vars['learning_rate']
-            updates = _gradient_updates_momentum(
-                self.vars['parameters'], self.grad,
-                learn_rate, momentum)
-        elif sgd_method == 'adadelta':
-            updates = _gradient_updates_adadelta(
-                self.vars['parameters'], self.grad)
-        else:
-            new_pars = self.vars['parameters']
-            new_pars += self.vars['learning_rate'] * self.grad
-            updates = [(self.vars['parameters'], new_pars)]
-        return updates
-
-    def _update_fig(self, len_shown_history):
-        # retrieve or create figure object
-        if self._fig is None:
-            self._fig, self._ax = plt.subplots(1, 1, figsize=(10, 5))
-        fig, ax = self._fig, self._ax
-        ax.clear()
-        # plot new fidelities
-        n_epoch = self.log['n_epoch']
-        fids = self.log['fidelities']
-        if len_shown_history is None:
-            ax.plot(fids[:n_epoch], '-b', linewidth=1)
-        else:
-            if n_epoch + 1 == len_shown_history:
-                x_coords = np.arange(
-                    n_epoch - len_shown_history + 1, n_epoch + 1)
-            else:
-                x_coords = np.arange(n_epoch + 1)
-            ax.plot(x_coords, fids[x_coords], '-b', linewidth=1)
-        plt.suptitle('learning rate: {}\nfidelity: {}'.format(
-            self.vars['learning_rate'].get_value(), fids[n_epoch]))
-        fig.canvas.draw()
-
-    def refill_test_data(self):
-        """Generate new test data and put them in shared variable.
-        """
-        inputs, outputs = self.net.generate_training_states(
-            self.hyperpars['test_dataset_size'])
-        self.vars['test_inputs'].set_value(inputs)
-        self.vars['test_outputs'].set_value(outputs)
-
-    def refill_training_data(self):
-        """Generate new training data and put them in shared variable.
-        """
-        inputs, outputs = self.net.generate_training_states(
-            self.hyperpars['train_dataset_size'])
-        self.vars['train_inputs'].set_value(inputs)
-        self.vars['train_outputs'].set_value(outputs)
-
-    def train_epoch(self):
-        """Generate training states and train for an epoch."""
-        self.refill_training_data()
-        n_train_batches = (self.hyperpars['train_dataset_size'] //
-                           self.hyperpars['batch_size'])
-        for minibatch_index in range(n_train_batches):
-            self.train_model(minibatch_index)
-
-    def test_epoch(self, save_parameters=True):
-        """Compute fidelity, and store fidelity and parameters."""
-        fidelity = self.test_model()
-        n_epoch = self.log['n_epoch']
-        if save_parameters:
-            self.log['parameters'][n_epoch] = (
-                self.vars['parameters'].get_value())
-        self.log['fidelities'][n_epoch] = fidelity
-
-    def _compile_model(self):
-        """Compile train and test models.
-
-        Compile the training function `train_model`, that while computing
-        the cost at every iteration (batch), also updates the weights of
-        the network based on the rules defined in `updates`.
-        """
-        batch_size = self.hyperpars['batch_size']
-        batch_start = self.vars['index'] * batch_size
-        batch_end = (self.vars['index'] + 1) * batch_size
-        train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
-        train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
-        print('Compiling model ...', end='')
-        self.train_model = theano.function(
-            inputs=[self.vars['index']],
-            outputs=self.cost,
-            updates=self.updates,
-            givens={
-                self.net.inputs: train_inputs_batch,
-                self.net.outputs: train_outputs_batch
-            })
-        # `test_model` is used to test the fidelity given by the currently
-        # trained parameters. It's called at regular intervals during
-        # the computation, and is the value shown in the dynamically
-        # updated plot that is shown when the training is ongoing.
-        self.test_model = theano.function(
-            inputs=[],
-            outputs=self.cost,
-            updates=None,
-            givens={self.net.inputs: self.vars['test_inputs'],
-                    self.net.outputs: self.vars['test_outputs']})
-        print(' done.')
-
-    def _run(self, save_parameters=True, len_shown_history=200):
-        # generate testing states
-        self.refill_test_data()
-        self._compile_model()
-
-        n_epochs = self.hyperpars['n_epochs']
-        # initialize log
-        self.log['fidelities'] = np.zeros(n_epochs)
-        if save_parameters:
-            self.log['parameters'] = np.zeros((
-                n_epochs, len(self.vars['parameters'].get_value())))
-        # run epochs
-        for n_epoch in range(n_epochs):
-            self.log['n_epoch'] = n_epoch
-            self.train_epoch()
-            self.test_epoch(save_parameters=save_parameters)
-            self._update_fig(len_shown_history)
-            # stop if fidelity 1 is obtained
-            if self.log['fidelities'][n_epoch] == 1:
-                print('Fidelity 1 obtained, stopping.')
-                break
-            # update learning rate
-            self.vars['learning_rate'].set_value(
-                self.hyperpars['initial_learning_rate'] / (
-                    1 + self.hyperpars['decay_rate'] * n_epoch))
-
-    def run(self, save_parameters=True, len_shown_history=200,
-            save_after=None):
-        """
-        Start the optimization.
-
-        Parameters
-        ----------
-        save_parameters : bool, optional
-            If True, the entire history of the parameters is stored.
-        len_shown_history : int, optional
-            If not None, the figure showing the fidelity for every epoch
-            only shows the last `len_shown_history` epochs.
-        save_after : str, optional
-            If not None, it is used to save the results to file.
-        """
-        args = locals()
-        # catch abort to stop training at will
-        try:
-            self._run(args)
-        except KeyboardInterrupt:
-            pass
-
-        if save_after is not None:
-            self._save_results()
-
-    def plot_parameters_history(self, return_fig=False, return_df=False,
-                                online=False):
-        import cufflinks
-        names = [par.name for par in self.net.free_parameters]
-        df = pd.DataFrame(self._get_meaningful_history()['parameters'])
-        new_col_names = dict(zip(range(df.shape[1]), names))
-        df.rename(columns=new_col_names, inplace=True)
-        if return_df:
-            return df
-
-        return df.iplot(asFigure=return_fig, online=online)

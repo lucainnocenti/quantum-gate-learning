@@ -2,13 +2,10 @@
 Compute the base object representing the qubit network.
 """
 import itertools
-import numbers
 import numpy as np
 import sympy
 
 import qutip
-import theano
-import theano.tensor as T
 
 from .utils import complex2bigreal
 
