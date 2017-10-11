@@ -59,6 +59,7 @@ class QubitNetworkModel(QubitNetwork):
                          free_parameters_order=free_parameters_order)
         # attributes initialization
         self.initial_values = self._set_initial_values(initial_values)
+        # this line takes ~1 sec
         self.parameters, self.hamiltonian_model = self._build_theano_graph()
         # self.inputs and self.outputs are the holders for the training/testing
         # inputs and corresponding output states. They are used to build
@@ -69,53 +70,6 @@ class QubitNetworkModel(QubitNetwork):
     def compute_evolution_matrix(self):
         """Compute matrix exponential of iH."""
         return T.slinalg.expm(self.hamiltonian_model)
-
-    def generate_training_states_decision_problem(self,
-                                                  num_states,
-                                                  num_qubits_input1,
-                                                  num_qubits_input2,
-                                                  num_qubits_answer,
-                                                  decision_fn=None,
-                                                  ancillae_state=None):
-        num_qubits_inputs = num_qubits_input1 + num_qubits_input2
-        # abort if there are not enough qubits in the whole network
-        if (num_qubits_inputs + num_qubits_answer > self.num_qubits):
-            raise ValueError('Not enough qubits in the network.')
-        # generate two random sets of input states
-        inputs1 = _random_input_states(num_states, num_qubits_input1)
-        inputs2 = _random_input_states(num_states, num_qubits_input2)
-        # `decision_fn` is the function computing the answer qubit state
-        # that we want to be associated with a given pair of inputs
-        if decision_fn is None:
-            def decision_fn(input1, input2):
-                if qutip.fidelity(input1, input2) > 0.8:
-                    return qutip.basis(2, 1)
-                else:
-                    return qutip.basis(2, 0)
-        if ancillae_state is None:
-            ancillae_state = qutip.basis(2, 0)
-        # initial state of answer qubits
-        answer_qubits_init = qutip.tensor(
-            *([qutip.basis(2, 0)] * num_qubits_answer))
-        # compute the states we want to be given in the answer qubit(s)
-        answers = [decision_fn(input1, input2)
-                   for input1, input2 in zip(inputs1, inputs2)]
-        # compute number of remaining qubits, to be used as ancillary (
-        # or "processor") qubits
-        num_ancillae = self.num_qubits - num_qubits_inputs - num_qubits_answer
-        ancillae_states = qutip.tensor(*([ancillae_state] * num_ancillae))
-        # complete input states with ancillae and convert to big real
-        training_inputs = []
-        training_outputs = []
-        for states in enumerate(zip(inputs1, inputs2, answers)):
-            input1, input2, answer = states
-            full_input = qutip.tensor(answer_qubits_init, input1, input2,
-                                      ancillae_states)
-            training_inputs.append(complex2bigreal(full_input))
-            training_outputs.append(complex2bigreal(answer))
-        training_inputs = np.asarray(training_inputs)
-        training_outputs = np.asarray(training_outputs)
-        return training_inputs, training_outputs
 
     def _set_initial_values(self, values=None):
         """Set initial values for the parameters in the Hamiltonian.
@@ -262,7 +216,7 @@ class QubitNetworkModel(QubitNetwork):
         if stringify_index:
             pars_df.index = pars_df.index.map(str)
         return pars_df
-    
+
     def plot_net_parameters(self, sort_index=True, plotly_online=False,
                             mode='lines+markers+text',
                             overlay_hlines=None,
@@ -335,15 +289,18 @@ class QubitNetworkGateModel(QubitNetworkModel):
                  ancillae_state=None,
                  initial_values=None,
                  target_gate=None):
-        super().__init__(num_qubits=num_qubits,
-                         interactions=interactions,
-                         net_topology=net_topology,
-                         sympy_expr=sympy_expr,
-                         free_parameters_order=free_parameters_order)
+        super().__init__(
+            num_qubits=num_qubits,
+            interactions=interactions,
+            net_topology=net_topology,
+            sympy_expr=sympy_expr,
+            free_parameters_order=free_parameters_order,
+            initial_values=initial_values)
         # parameters initialization
         self.ancillae_state = None  # initial values for ancillae (if any)
         self.num_system_qubits = None  # number of input/output qubits
         self.target_gate = target_gate
+        self.outputs_size = None  # size of complex output ket states
         # Build the initial state of the ancillae, if there are any
         if num_system_qubits is None:
             self.num_system_qubits = self.num_qubits
@@ -351,6 +308,8 @@ class QubitNetworkGateModel(QubitNetworkModel):
             self.num_system_qubits = num_system_qubits
         if self.num_system_qubits < self.num_qubits:
             self._initialize_ancillae(ancillae_state)
+        # set size of complex output ket states
+        self.outputs_size = 2**(self.num_qubits - self.num_system_qubits)
 
     def _initialize_ancillae(self, ancillae_state):
         """Initialize ancillae states, as a qutip.Qobj object.
@@ -530,3 +489,121 @@ class QubitNetworkGateModel(QubitNetworkModel):
         if return_qobj:
             return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
         return gate
+
+
+class QubitNetworkDecisionProblemModel(QubitNetworkModel):
+    """Model to be used to train network to solve decision problems.
+
+    Example of target_function:
+    ```
+    def decision_fn(input1, input2):
+        if qutip.fidelity(input1, input2) > 0.8:
+            return qutip.basis(2, 1)
+        else:
+            return qutip.basis(2, 0)
+    ```
+    """
+    # pylint: disable=W0221
+    def __init__(self,
+                 num_qubits=None,
+                 num_qubits_per_input=None,
+                 num_qubits_answer=None,
+                 target_function=None,
+                 interactions=None,
+                 sympy_expr=None,
+                 free_parameters_order=None,
+                 initial_values=None):
+        super().__init__(
+            num_qubits=num_qubits,
+            interactions=interactions,
+            sympy_expr=sympy_expr,
+            free_parameters_order=free_parameters_order,
+            initial_values=initial_values)
+        # define new attributes
+        self.ancillae_state = None  # initial values for ancillae
+        self.num_inputs = None  # the number of inputs of the problem
+        self.num_qubits_per_input = None  # number of qubits used for inputs
+        self.num_qubits_answer = None  # number of qubits used for answer
+        self.num_qubits_ancillae = None  # total number of qubits to trace out
+        self.num_qubits_processor = None  # num of non-answer non-input qubits
+        self.target_function = None  # the function to compute answers
+        self.processor_state = None  # initial state of processor qubits
+        self.outputs_size = None  # size of output state ket vectors
+        # ---- assign values and define defaults ----
+        if num_qubits_per_input is None:
+            raise ValueError('The number of qubits to be used as inputs'
+                             ' have to be specified.')
+        if isinstance(num_qubits_per_input, numbers.Number):
+            self.num_qubits_per_input = [num_qubits_per_input]
+        elif isinstance(num_qubits_per_input, (list, tuple)):
+            self.num_qubits_per_input = num_qubits_per_input
+        else:
+            raise ValueError('The value of num_qubits_per_input should'
+                             ' be an integer of list of positive integers.')
+        self.num_inputs = len(self.num_qubits_per_input)
+
+        if num_qubits_answer is None:
+            num_qubits_answer = 1
+        self.num_qubits_answer = num_qubits_answer
+
+        self.num_qubits_ancillae = self.num_qubits - self.num_qubits_answer
+
+        # check that the specified numbers of qubits make sense
+        self.num_qubits_processor = (
+            self.num_qubits - sum(self.num_qubits_per_input) -
+            self.num_qubits_answer)
+        if self.num_qubits_processor < 0:
+            raise ValueError(
+                'The specified numbers of qubits are inconsistent.')
+        # for now we just initialise all processor qubits to the 0 state
+        self.processor_state = qutip.tensor(
+            *([qutip.basis(2, 0)] * self.num_qubits_processor))
+        # check that a target function has been given
+        if target_function is None:
+            raise ValueError('You must give a target function for the '
+                             'decision problem to be well defined.')
+        self.target_function = target_function
+        # set size of output ket states (when in complex form)
+        self.outputs_size = 2**self.num_qubits_answer
+
+    def generate_training_states(self, num_states):
+        # generate random sets of input states
+        inputs = []
+        for num_qubits_input in self.num_qubits_per_input:
+            inputs.append(_random_input_states(num_states, num_qubits_input))
+        # transpose `inputs`, to have the i-th element contain the list
+        # of input states corresponding to the i-th training input
+        inputs = list(zip(*inputs))
+        # initial state of answer qubits
+        answer_qubits_init = qutip.tensor(
+            *([qutip.basis(2, 0)] * self.num_qubits_answer))
+        # compute the states we want to be given in the answer qubit(s)
+        # here `input` is the set of all inputs for all training inputs,
+        # while `_inputs` is the set of inputs for a single training
+        # iteration.
+        # from IPython.core.debugger import set_trace; set_trace()
+        answers = [self.target_function(*_inputs) for _inputs in inputs]
+        # complete input states with ancillae and convert to big real
+        training_inputs = []
+        training_outputs = []
+        for _inputs, answer in zip(inputs, answers):
+            full_input = qutip.tensor(answer_qubits_init, *_inputs,
+                                      self.processor_state)
+            training_inputs.append(complex2bigreal(full_input))
+            training_outputs.append(complex2bigreal(answer))
+        training_inputs = np.asarray(training_inputs)
+        training_outputs = np.asarray(training_outputs)
+        len_inputs = training_inputs.shape[1]
+        len_outputs = training_outputs.shape[1]
+        training_inputs = training_inputs.reshape((num_states, len_inputs))
+        training_outputs = training_outputs.reshape((num_states, len_outputs))
+        return training_inputs, training_outputs
+
+    def fidelity(self, return_mean=True):
+        states = TheanoQstates(self.inputs)
+        states.evolve_all_kets(self.compute_evolution_matrix())
+        fidelities = states.fidelities(self.outputs, self.num_qubits_ancillae)
+        if return_mean:
+            return T.mean(fidelities)
+        else:
+            return fidelities

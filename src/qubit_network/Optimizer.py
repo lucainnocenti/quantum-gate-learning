@@ -107,7 +107,7 @@ class Optimizer:
             return theano.shared(np.asarray(
                 arr, dtype=theano.config.floatX), name=name)
         inputs_length = 2 * 2**self.net.num_qubits
-        outputs_length = 2 * 2**self.net.num_system_qubits
+        outputs_length = 2 * self.net.outputs_size
         self.vars = dict(
             index=T.lscalar('minibatch index'),
             learning_rate=_sharedfloat(learning_rate, 'learning rate'),

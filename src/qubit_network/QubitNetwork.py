@@ -4,10 +4,7 @@ Compute the base object representing the qubit network.
 import itertools
 import numpy as np
 import sympy
-
 import qutip
-
-from .utils import complex2bigreal
 
 
 def pauli_product(*args):
