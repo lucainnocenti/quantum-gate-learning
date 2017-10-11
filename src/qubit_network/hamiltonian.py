@@ -182,6 +182,8 @@ class QubitNetworkHamiltonian:
         elif isinstance(interactions, list):
             self.interactions = interactions
         # store values of symbols and matrices for chosen interactions
+        if len(self.interactions) == 0:
+            raise ValueError('No interaction value has been specified.')
         make_symbols_and_matrices(self.interactions)
 
     def _parse_from_topology(self, num_qubits, topology):
