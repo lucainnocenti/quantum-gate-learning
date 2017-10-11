@@ -5,6 +5,7 @@ import qutip
 
 import theano
 import theano.tensor as T
+import theano.tensor.slinalg
 
 import matplotlib.pyplot as plt
 import seaborn as sns
