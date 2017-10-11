@@ -61,7 +61,7 @@ def normalize_phase(gate):
 def trace_ancillae_and_normalize(net, num_system_qubits=None, eps=1e-4):
     # if net is a QubitNetwork object
     if hasattr(net, 'get_current_gate'):
-        gate = net.get_current_gate(return_Qobj=True)
+        gate = net.get_current_gate(return_qobj=True)
         gate = gate.ptrace(list(range(net.num_system_qubits)))
         gate = gate * np.exp(-1j * np.angle(gate[0, 0]))
         return chop(gate)
@@ -77,7 +77,7 @@ def trace_ancillae_and_normalize(net, num_system_qubits=None, eps=1e-4):
 
 def project_ancillae(net, ancillae_state):
     """Project the ancillae over the specified state."""
-    gate = net.get_current_gate(return_Qobj=True)
+    gate = net.get_current_gate(return_qobj=True)
     ancillae_proj = qutip.ket2dm(ancillae_state)
     identity_over_system = qutip.tensor(
         [qutip.qeye(2) for _ in range(net.num_system_qubits)])
@@ -158,7 +158,7 @@ def plot_gate(net,
         a nice formatting.
     """
     try:
-        gate = net.get_current_gate(return_Qobj=True)
+        gate = net.get_current_gate(return_qobj=True)
     except AttributeError:
         # if `net` does not have the `get_current_gate` method it is assumed
         # to be the matrix to be plotted.

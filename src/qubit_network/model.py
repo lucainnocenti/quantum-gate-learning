@@ -540,6 +540,10 @@ class QubitNetworkModel(QubitNetwork):
         return [parameters, theano_graph]
 
     def get_current_hamiltonian(self):
+        """Return Hamiltonian of the system with current parameters.
+
+        The returned Hamiltonian is a numpy.ndarray object.
+        """
         ints_values = self.parameters.get_value()
         matrices = [np.asarray(matrix).astype(np.complex)
                     for matrix in self.matrices]
@@ -548,9 +552,12 @@ class QubitNetworkModel(QubitNetwork):
             final_matrix += parameter * matrix
         return final_matrix
 
-    def get_current_gate(self):
+    def get_current_gate(self, return_qobj=True):
         """Return the gate implemented by current interaction values."""
-        return scipy.linalg.expm(-1j * self.get_current_hamiltonian())
+        gate = scipy.linalg.expm(-1j * self.get_current_hamiltonian())
+        if return_qobj:
+            return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
+        return gate
 
 
 class Optimizer:
@@ -604,6 +611,8 @@ class Optimizer:
         self.cost = self.net.fidelity()
         self.cost.name = 'mean fidelity'
         self.grad = T.grad(cost=self.cost, wrt=self.vars['parameters'])
+        self.train_model = None  # to be assigned in `compile_model`
+        self.test_model = None  # assigned in `compile_model`
         # define updates, to be performed at every call of `train_XXX`
         self.updates = self._make_updates(sgd_method)
         # initialize log to be filled with the history later
@@ -789,7 +798,7 @@ class Optimizer:
 
     def _compile_model(self):
         """Compile train and test models.
-        
+
         Compile the training function `train_model`, that while computing
         the cost at every iteration (batch), also updates the weights of
         the network based on the rules defined in `updates`.
