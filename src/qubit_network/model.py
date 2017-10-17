@@ -173,6 +173,17 @@ class QubitNetworkModel(QubitNetwork):
             final_matrix += parameter * matrix
         return final_matrix
 
+    def get_current_gate(self, return_qobj=True):
+        """Return the gate implemented by current interaction values.
+
+        The returned value is a numpy ndarray, or a qutip Qobj if
+        requested through the `return_qobj` parameter.
+        """
+        gate = scipy.linalg.expm(-1j * self.get_current_hamiltonian())
+        if return_qobj:
+            return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
+        return gate
+
     def net_parameters_to_dataframe(self, stringify_index=False):
         """
         Take parameters from a QubitNetwork object and put it in DataFrame.
@@ -478,17 +489,6 @@ class QubitNetworkGateModel(QubitNetworkModel):
         training_inputs = training_inputs.reshape((num_states, len_inputs))
         target_outputs = target_outputs.reshape((num_states, len_outputs))
         return training_inputs, target_outputs
-
-    def get_current_gate(self, return_qobj=True):
-        """Return the gate implemented by current interaction values.
-
-        The returned value is a numpy ndarray, or a qutip Qobj if
-        requested through the `return_qobj` parameter.
-        """
-        gate = scipy.linalg.expm(-1j * self.get_current_hamiltonian())
-        if return_qobj:
-            return qutip.Qobj(gate, dims=[[2] * self.num_qubits] * 2)
-        return gate
 
 
 class QubitNetworkDecisionProblemModel(QubitNetworkModel):
