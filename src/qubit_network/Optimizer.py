@@ -175,6 +175,7 @@ class Optimizer:
             sgd_method=hyperpars['sgd_method'],
             target_gate=opt_data['target_gate'])
         optimizer.log = opt_data['log']
+        optimizer.initial_parameters_values = opt_data['initial_interactions']
         return optimizer
 
     @staticmethod
@@ -207,12 +208,15 @@ class Optimizer:
             saved_log['parameters'] = self.log['parameters'][:end_useful_log]
         return saved_log
 
-    def save_results(self, file):
+    def save_results(self, file, overwrite=False):
         """Save optimization results.
 
         The idea is here to save all the information required to
         reproduce a given training session.
         """
+        if os.path.isfile(file) and not overwrite:
+            raise FileExistsError('File already exists. Use the `overwrite`'
+                                  ' switch to overwrite existing file.')
         net_data = dict(
             sympy_model=self.net.get_matrix(),
             free_parameters=self.net.free_parameters,
@@ -398,14 +402,20 @@ class Optimizer:
         if save_after is not None:
             self._save_results()
 
-    def plot_parameters_history(self, return_fig=False, return_df=False,
-                                online=False):
+    def plot_parameters_history(self, return_fig=False, return_df=False):
         import cufflinks
         names = [par.name for par in self.net.free_parameters]
         df = pd.DataFrame(self._get_meaningful_history()['parameters'])
+        initial_values = pd.DataFrame([self.initial_parameters_values])
+        df = pd.concat([initial_values, df], ignore_index=True)
         new_col_names = dict(zip(range(df.shape[1]), names))
         df.rename(columns=new_col_names, inplace=True)
         if return_df:
             return df
 
-        return df.iplot(asFigure=return_fig, online=online)
+        fig = df.iplot(asFigure=True)
+        if return_fig:
+            return fig
+        import plotly
+        # just plotting offline at the moment
+        plotly.offline.iplot(fig)

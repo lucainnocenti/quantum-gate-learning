@@ -15,7 +15,7 @@ import cufflinks
 import qutip
 
 from .QubitNetwork import QubitNetwork
-from .model import QubitNetworkModel
+from .model import QubitNetworkModel, QubitNetworkGateModel
 from .utils import chop
 
 
@@ -398,10 +398,10 @@ def _load_network_from_pickle(filename):
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
     opt_data = data['optimization_data']
-    net = QubitNetworkModel(sympy_expr=net_data['sympy_model'],
-                            target_gate=opt_data['target_gate'],
-                            free_parameters_order=net_data['free_parameters'],
-                            initial_values=opt_data['final_interactions'])
+    net = QubitNetworkGateModel(sympy_expr=net_data['sympy_model'],
+                                target_gate=opt_data['target_gate'],
+                                free_parameters_order=net_data['free_parameters'],
+                                initial_values=opt_data['final_interactions'])
     return net
 
 
@@ -594,8 +594,8 @@ class NetsDataFolder:
         Simple wildcard matching provided by `fnmatch.filter` is used.
         """
         new_data = NetsDataFolder(self.path)
-        new_data.files['json'] = fnmatch.filter(self.files['json'], pat)
-        new_data.files['pickle'] = fnmatch.filter(self.files['pickle'], pat)
+        new_data.files['json'] = fnmatch.filter(self.files['json'], '*/' + pat)
+        new_data.files['pickle'] = fnmatch.filter(self.files['pickle'], '*/' + pat)
         new_data.nets = [net for net in self.nets
                          if fnmatch.fnmatch(net.name, pat)]
         return new_data
