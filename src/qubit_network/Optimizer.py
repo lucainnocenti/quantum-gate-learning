@@ -81,6 +81,39 @@ def _gradient_updates_adadelta(params, grads):
 class Optimizer:
     """
     Main object handling the optimization of a `QubitNetwork` instance.
+
+    Parameters
+    ----------
+    net : object or string
+        Object representing the qubit network to be trained. If a string
+        is given the object is loaded from fileusing `Optimizer._load_net`.
+    learning_rate : float
+        Initial learning rate for the training. The value of the learning
+        rate will usually (depending on the training method) be adapted
+        during training.
+    decay_rate : float
+        Determines the rate at which the learning rate decreases for
+        each epoch.
+    training_dataset_size
+    test_dataset_size
+    batch_size
+    n_epochs
+    target_gate
+    sgd_method
+
+    Attributes
+    ----------
+    net : some subclass of QubitNetworkModel
+    hyperpars : dict
+        Contains all the hyperparameters of the model.
+    vars : dict of theano objects
+        Contains the theano objects used in the fidelity graph.
+    cost
+    grad
+    train_model
+    test_model
+    updates
+    log
     """
     # pylint: disable=too-many-instance-attributes
     def __init__(self, net,
@@ -354,10 +387,15 @@ class Optimizer:
     def _run(self, save_parameters=True, len_shown_history=200):
         # generate testing states
         self.refill_test_data()
+        # now let's prepare the theano graph
         self._compile_model()
-
+        # at the end of each epoch, the current (estimated) fidelity is
+        # displayed, and a new set of training samples is generated
         n_epochs = self.hyperpars['n_epochs']
-        # initialize log
+        # initialize log. Note that this initialisation means that if the
+        # training stops before all the epochs are processed, then the
+        # 'fidelities' and 'parameters' arrays will contain tails of
+        # not meaningful zeros
         self.log['fidelities'] = np.zeros(n_epochs)
         if save_parameters:
             self.log['parameters'] = np.zeros((

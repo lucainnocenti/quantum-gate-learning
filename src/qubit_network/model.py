@@ -8,6 +8,7 @@ import qutip
 
 import theano
 import theano.tensor as T
+import theano.tensor.slinalg
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -44,6 +45,10 @@ class QubitNetworkModel(QubitNetwork):
 
     Here we add the theano variables and functions to compute fidelity
     and so on.
+
+    This class also handles the exponentiation of the Hamiltonian, that
+    is, the associated unitary evolution, but has no notion of a "target
+    gate" and such.
     """
     def __init__(self, num_qubits=None,
                  interactions=None,

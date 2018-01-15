@@ -80,7 +80,18 @@ class QubitNetwork:
     ----------
     num_qubits : int,
         Number of qubits in the network.
-    parameters : string, tuple or list, optional
+    sympy_expr : sympy object, optional
+        A sympy symbolic matrix object. If given, it directly specifies
+        the Hamiltonian model to be used during the training. Do not use
+        together with `interactions` or `net_topology`.
+    free_parameters_order : list of sympy symbols, optional
+        This list is used to fix an ordering in the list of free parameters
+        of the model. It's required because without it one could e.g. get
+        inconsistent results by replacing the "first" symbols (the notion
+        of "i-th symbol" would not be assured).
+        If not given, it is automatically generated via `sympy`'s `free_symbols`
+        method.
+    interactions : string, tuple or list, optional
         If given, it is used to use the parameters in some predefined
         way. Possible values are:
         - 'all': use all 1- and 2-qubit interactions, each one with a

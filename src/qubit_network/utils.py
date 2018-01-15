@@ -102,6 +102,7 @@ def bigreal2qobj(arr):
 
 
 def theano_matrix_grad(matrix, parameters):
+    """Compute the gradient of every elementr of a theano matrix."""
     shape = matrix.shape
     num_elements = shape[0] * shape[1]
     flattened_matrix = T.flatten(matrix)
