@@ -44,7 +44,9 @@ def commutator(m1, m2):
 
 def impose_commutativity(mat, other_mat):
     sols = sympy.solve(commutator(mat, other_mat))
-    return mat.subs(sols[0])
+    # before sympy v1.1 we had to use `sols[0]`, but now it seems a set
+    # is returned instead
+    return mat.subs(sols)
 
 
 def commuting_generator(gate, interactions='all'):
