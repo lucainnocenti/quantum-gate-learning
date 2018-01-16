@@ -5,7 +5,8 @@ import os
 import inspect
 
 import numpy as np
-from numpy.testing import assert_array_equal, assert_almost_equal
+from numpy.testing import (assert_array_equal, assert_almost_equal,
+                           assert_array_less)
 import scipy
 import sympy
 
@@ -18,18 +19,55 @@ class TestOptimizer(unittest.TestCase):
         J00, J11 = sympy.symbols('J00 J11')
         hamiltonian_model = pauli_product(0, 0) * J00 + pauli_product(1, 1) * J11
         target_gate = qutip.Qobj(pauli_product(1, 1).tolist(), dims=[[2] * 2] * 2)
-        net = QubitNetworkGateModel(sympy_expr=hamiltonian_model, target_gate = target_gate)
-        optimizer = Optimizer(net)
+        model = QubitNetworkGateModel(sympy_expr=hamiltonian_model, target_gate = target_gate)
+        optimizer = Optimizer(model)
         # set parameters to have evolution implement XX gate
         new_parameters = [0, 0]
-        new_parameters[net.free_parameters.index(J11)] = np.pi / 2
+        new_parameters[model.free_parameters.index(J11)] = np.pi / 2
         optimizer.net.parameters.set_value(new_parameters)
         # check via optimizer.cost that |00> goes to |11>
         fidelity = theano.function([], optimizer.cost, givens={
-            net.inputs: complex2bigreal([1, 0, 0, 0]).reshape((1, 8)),
-            net.outputs: complex2bigreal([0, 0, 0, 1]).reshape((1, 8))
+            model.inputs: complex2bigreal([1, 0, 0, 0]).reshape((1, 8)),
+            model.outputs: complex2bigreal([0, 0, 0, 1]).reshape((1, 8))
         })()
         assert_almost_equal(fidelity, np.array(1))
+
+    def test_grad(self):
+        J00, J11 = sympy.symbols('J00 J11')
+        hamiltonian_model = pauli_product(0, 0) * J00 + pauli_product(1, 1) * J11
+        target_gate = qutip.Qobj(pauli_product(1, 1).tolist(), dims=[[2] * 2] * 2)
+        model = QubitNetworkGateModel(sympy_expr=hamiltonian_model,
+                                      initial_values=1)
+        optimizer = Optimizer(model, target_gate=target_gate,
+                              learning_rate=1, decay_rate=0.01)
+        optimizer.refill_training_data(sample_size=2)
+        train_model = theano.function([], optimizer.cost,
+            updates=optimizer.updates,
+            givens={
+                model.inputs: optimizer.vars['train_inputs'],
+                model.outputs: optimizer.vars['train_outputs']
+            }
+        )
+        first_fid = train_model()
+        second_fid = train_model()
+        assert_array_less(first_fid, second_fid)
+
+    # def test_single_train_step(self):
+    #     J00, J11 = sympy.symbols('J00 J11')
+    #     hamiltonian_model = pauli_product(0, 0) * J00 + pauli_product(1, 1) * J11
+    #     target_gate = qutip.Qobj(pauli_product(1, 1).tolist(), dims=[[2] * 2] * 2)
+    #     model = QubitNetworkGateModel(sympy_expr=hamiltonian_model)
+    #     optimizer = Optimizer(model, target_gate=target_gate)
+    #     optimizer.refill_training_data()
+    #     train_model = theano.function([], optimizer.cost,
+    #         updates=optimizer.updates,
+    #         givens={
+    #             model.inputs: optimizer.vars['train_inputs'],
+    #             model.outputs: optimizer.vars['train_outputs']
+    #         }
+    #     )
+    #     print(train_model())
+    #     print(train_model())
 
 
 if __name__ == '__main__':

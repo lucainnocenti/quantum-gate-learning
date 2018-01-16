@@ -14,7 +14,7 @@ import theano
 import theano.tensor as T
 
 
-class QubitNetworkModel(unittest.TestCase):
+class TestQubitNetworkModel(unittest.TestCase):
     def test_evolution_matrix_x1_xx(self):
         # Test the consistency of the output of `compute_evolution_matrix`
         # with the result obtained directly via `scipy.linalg.expm`.
@@ -74,6 +74,7 @@ class QubitNetworkModel(unittest.TestCase):
         )
 
     def test_grad_evolution(self):
+        """Test computation of grad of expm."""
         J00, J11 = sympy.symbols('J00 J11')
         hamiltonian = J00 * pauli_product(0, 0) + J11 * pauli_product(1, 1)
         net = QubitNetworkModel(sympy_expr=hamiltonian)
@@ -94,8 +95,34 @@ class QubitNetworkModel(unittest.TestCase):
         # compare results
         assert_almost_equal(grads0, manual_grad0)
 
+    def test_grad_evolution2(self):
+        """Test computation of grad of expm.
 
-class QubitNetworkGateModel(unittest.TestCase):
+        Note: This test fails if theano is not patched to correct the
+        gradient of expm
+        """
+        J00, J11 = sympy.symbols('J00 J11')
+        hamiltonian = J00 * pauli_product(0, 0) + J11 * pauli_product(1, 1)
+        net = QubitNetworkModel(sympy_expr=hamiltonian)
+        unitary_evolution = net.compute_evolution_matrix()
+        grads_matrix = theano_matrix_grad(unitary_evolution, net.parameters)
+        compute_grads = theano.function([], grads_matrix)
+        args = [0, 0]
+        net.parameters.set_value(args)
+        grads0, grads1 = compute_grads()
+        # manual gradient
+        _compute_evol = theano.function([], unitary_evolution)
+        def compute_evol(*args):
+            net.parameters.set_value([*args])
+            return _compute_evol()
+        eps = 0.00000001
+        manual_grad0 = (compute_evol(args[0] + eps, args[1]) - compute_evol(
+            args[0], args[1])) / eps
+        # compare results
+        assert_almost_equal(grads0, manual_grad0)
+
+
+class TestQubitNetworkGateModel(unittest.TestCase):
     def test_generation_training_states(self):
         J20, J33 = sympy.symbols('J20 J33')
         y1 = pauli_product(2, 0)
@@ -205,5 +232,4 @@ if __name__ == '__main__':
     from qubit_network.utils import (bigreal2complex, complex2bigreal,
                                      bigreal2qobj, theano_matrix_grad)
     from qubit_network.theano_qutils import _fidelity_no_ptrace
-
     unittest.main(failfast=True)
