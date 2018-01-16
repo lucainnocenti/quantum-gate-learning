@@ -74,10 +74,22 @@ class QubitNetworkModel(QubitNetwork):
     initial_values : numpy array of floats
         The starting values assumed by the interaction parameters. These
         are set up via the `initial_values` parameter.
-    parameters
-    hamiltonian_model
-    inputs
-    outputs
+    parameters : theano.tensor object
+        A theano shared tensor variable object, representing the set of
+        interaction parameters of the model. This is the set of parameters
+        that are trained by the optimizer.
+        The name corresponding to each parameter is stored in the
+        inherited `free_parameters` attribute.
+    hamiltonian_model : theano.tensor object
+        A theano.tensor object corresponding to -1j * H with H the model
+        Hamiltonian, represented in big real form. This is the object
+        whose expm gives the unitary evolution.
+    inputs : theano.tensor.dmatrix
+        To be filled with the training inputs.
+    outputs : theano.tensor.dmatrix
+        To be filled with the training outputs.
+        Together with `parameters`, `inputs` and `outputs` are all of
+        the parameters in the `fidelity` computational graph.
     """
     def __init__(self, num_qubits=None,
                  interactions=None,

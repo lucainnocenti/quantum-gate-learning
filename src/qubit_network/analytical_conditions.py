@@ -11,10 +11,16 @@ from .QubitNetwork import pauli_product
 
 
 def J(*args):
+    """Simple helper to generate standardised sympy.Symbol objects.
+    """
     return sympy.Symbol('J' + ''.join(str(arg) for arg in args))
 
 
 def is_diagonal_interaction(int_tuple):
+    """True if the tuple represents a diagonal interaction.
+
+    A one-qubit interaction is automatically "diagonal".
+    """
     nonzero_indices = [idx for idx in int_tuple if idx != 0]
     return len(set(nonzero_indices)) == 1
 
@@ -50,6 +56,17 @@ def impose_commutativity(mat, other_mat):
 
 
 def commuting_generator(gate, interactions='all'):
+    """Produce Hamiltonian with restricted interactions producing gate.
+
+    Computes a general parametrised Hamiltonian, containing only the
+    requested set of interactions, that commutes with `gate`, which
+    generally represents the canonical generator of a target gate.
+    The idea is that if an Hamiltonian does not commute with the
+    canonical generator, then it cannot generate the gate.
+
+    The inputs `gate` should be a np.array or qutip object, while the
+    output is given as a sympy symbol.
+    """
     if isinstance(gate, qutip.Qobj):
         gate = gate.data.toarray()
     gate = np.asarray(gate)
