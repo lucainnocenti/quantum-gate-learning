@@ -9,7 +9,7 @@ import qutip
 
 def pauli_product(*args):
     """
-    Return sympy.Matrix object represing product of Pauli matrices.
+    Return sympy.Matrix object representing product of Pauli matrices.
 
     Examples
     --------

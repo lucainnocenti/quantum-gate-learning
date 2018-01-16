@@ -4,6 +4,8 @@ import numpy as np
 import scipy
 import scipy.linalg
 import sympy
+from sympy.physics.quantum.tensorproduct import TensorProduct
+from sympy.physics.paulialgebra import Pauli
 import qutip
 
 from .QubitNetwork import _self_and_pairwise_interactions
@@ -20,16 +22,27 @@ def is_diagonal_interaction(int_tuple):
     """True if the tuple represents a diagonal interaction.
 
     A one-qubit interaction is automatically "diagonal".
+
+    Examples
+    --------
+    >>> is_diagonal_interaction((2, 2))
+    True
+    >>> is_diagonal_interaction((2, 0))
+    True
+    >>> is_diagonal_interaction((1, 1, 2))
+    False
     """
     nonzero_indices = [idx for idx in int_tuple if idx != 0]
     return len(set(nonzero_indices)) == 1
 
 
 def pairwise_interactions_indices(num_qubits):
+    """List of 1- and 2- qubit interaction terms."""
     return _self_and_pairwise_interactions(num_qubits)
 
 
 def pairwise_diagonal_interactions_indices(num_qubits):
+    """List of 1- and 2- qubit diagonal interaction terms."""
     all_ints = pairwise_interactions_indices(num_qubits)
     return [interaction for interaction in all_ints if is_diagonal_interaction(interaction)]
 
@@ -87,3 +100,50 @@ def commuting_generator(gate, interactions='all'):
     principal_ham = (-1j * scipy.linalg.logm(gate)).real
     # impose commutativity
     return impose_commutativity(general_ham, principal_ham)
+
+
+def get_pauli_coefficient(matrix, coefficient):
+    """Extract given Pauli coefficient from matrix.
+
+    The coefficient must be specified in the form of a tuple whose i-th
+    element tells the Pauli operator acting on the i-th qubit.
+    For example, `coefficient = (2, 1)` asks for the Y1 X2 coefficient.
+    Generally speaking, it should be a valid input to `pauli_product`.
+
+    The function works with sympy objects.
+    """
+    num_qubits = len(coefficient)
+    return sympy.trace(matrix * pauli_product(*coefficient)) / 2**num_qubits
+
+
+def symbolic_pauli_product(*args, as_tensor_product=False):
+    """
+    Return symbolic sympy object represing product of Pauli matrices.
+    """
+    if as_tensor_product:
+        tensor_product_elems = []
+        for arg in args:
+            if arg == 0:
+                tensor_product_elems.append(1)
+            else:
+                tensor_product_elems.append(Pauli(arg))
+        return TensorProduct(*tensor_product_elems)
+
+    out_expr = sympy.Integer(1)
+    for pos, arg in enumerate(args):
+        if arg != 0:
+            out_expr *= sympy.Symbol(['X', 'Y', 'Z'][arg - 1]
+                                     + '_' + str(pos), commutative=False)
+    return out_expr
+
+
+def pauli_basis(matrix, which_coefficients='all'):
+    """Take sympy matrix and decompose in terms of Pauli matrices."""
+    num_qubits = sympy.log(matrix.shape[0], 2)
+    if which_coefficients == 'all':
+        coefficients = pairwise_interactions_indices(num_qubits)
+    out_expr = sympy.Integer(0)
+    for coefficient in coefficients:
+        out_expr += (get_pauli_coefficient(matrix, coefficient)
+                     * symbolic_pauli_product(*coefficient))
+    return out_expr

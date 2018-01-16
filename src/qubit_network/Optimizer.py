@@ -177,6 +177,11 @@ class Optimizer:
         """Load from saved file."""
         import pickle
         _, ext = os.path.splitext(file)
+        # if no extension is specified, pickle is assumed by default
+        if ext == '':
+            ext = '.pickle'
+            file += '.pickle'
+        # accept only pickle files as of now
         if ext != '.pickle':
             raise NotImplementedError('Only pickle files for now!')
         with open(file, 'rb') as f:
@@ -461,3 +466,15 @@ class Optimizer:
         import plotly
         # just plotting offline at the moment
         plotly.offline.iplot(fig)
+
+    def test_grad(self, num_states=40, return_mean=False):
+        inputs, outputs = self.net.generate_training_states(num_states)
+        if return_mean:
+            out_grad = T.mean(self.grad)
+        else:
+            out_grad = self.grad
+        fn = theano.function([], out_grad, givens={
+            self.net.inputs: inputs,
+            self.net.outputs: outputs
+        })
+        return fn()
