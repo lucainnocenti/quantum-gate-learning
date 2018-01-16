@@ -99,6 +99,14 @@ class QubitNetwork:
         - ('all', (...)): use the specified types of intereactions for
             all qubits.
         - list of interactions: use all and only the given interactions.
+
+    Attributes
+    ----------
+    num_qubits : int
+    matrices : ndarray
+    free_parameters : list of sympy objects
+    interactions
+    net_topology
     """
 
     def __init__(self,

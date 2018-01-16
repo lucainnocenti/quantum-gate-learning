@@ -326,11 +326,15 @@ class Optimizer:
         self.vars['test_inputs'].set_value(inputs)
         self.vars['test_outputs'].set_value(outputs)
 
-    def refill_training_data(self):
+    def refill_training_data(self, sample_size=None):
         """Generate new training data and put them in shared variable.
+
+        Most of the job is relayed to the `generate_training_states`
+        method of the QubitNetworkModel object that is being trained.
         """
-        inputs, outputs = self.net.generate_training_states(
-            self.hyperpars['train_dataset_size'])
+        if sample_size is None:
+            sample_size = self.hyperpars['train_dataset_size']
+        inputs, outputs = self.net.generate_training_states(sample_size)
         self.vars['train_inputs'].set_value(inputs)
         self.vars['train_outputs'].set_value(outputs)
 

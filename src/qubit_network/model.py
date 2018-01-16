@@ -49,6 +49,35 @@ class QubitNetworkModel(QubitNetwork):
     This class also handles the exponentiation of the Hamiltonian, that
     is, the associated unitary evolution, but has no notion of a "target
     gate" and such.
+
+    Parameters
+    ----------
+    num_qubits : int
+    interactions : list or dict or str, optional
+    net_topology : dict, optional
+    sympy_expr : sympy object, optional
+    free_parameters_order : list of sympy objects, optional
+    initial_values : int, optional
+
+    Attributes
+    ----------
+    num_qubits
+        Inherited from QubitNetwork
+    matrices : ndarray
+        Inherited from QubitNetwork
+    free_parameters : list of sympy objects
+        Inherited from QubitNetwork
+    interactions
+        Inherited from QubitNetwork
+    net_topology
+        Inherited from QubitNetwork
+    initial_values : numpy array of floats
+        The starting values assumed by the interaction parameters. These
+        are set up via the `initial_values` parameter.
+    parameters
+    hamiltonian_model
+    inputs
+    outputs
     """
     def __init__(self, num_qubits=None,
                  interactions=None,
