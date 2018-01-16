@@ -389,6 +389,7 @@ def _load_network_from_pickle(filename):
 
     The QubitNetwork objects should have been stored into the file in
     pickle format, using the appropriate `save_to_file` method.
+    The returned object is QubitNetworkGateModel.
     """
 
     with open(filename, 'rb') as file:
@@ -429,6 +430,24 @@ def load_network_from_file(filename, fmt=None):
 class NetDataFile:
     """
     Represent a single data file containing a saved net.
+
+    Parameters
+    ----------
+    path : string
+        Path of the data file.
+
+    Attributes
+    ----------
+    path : string
+        Full path.
+    full_name : string
+        Name of file, included extension.
+    name : string
+        Name of file, without extension.
+    ext : string
+        File extension (usually 'pickle' or 'json')
+    _data : QubitNetworkGateModel object
+        This is loaded via `_load` from file.
     """
     def __init__(self, path):
         self.path = path
@@ -447,7 +466,7 @@ class NetDataFile:
 
     def _load(self):
         """
-        Read data from the stored path and save it into `self.data`.
+        Read data from the stored path and save it into `self._data`.
 
         If the data was already loaded, it is loaded again.
         """
@@ -503,6 +522,9 @@ class NetDataFile:
             'value': values
         }).set_index('interaction')
 
+    def view_fidelity(self, n_samples=40):
+        return self.data.fidelity_test(n_samples=n_samples)
+
 
 class NetsDataFolder:
     """
@@ -511,6 +533,18 @@ class NetsDataFolder:
     This function assumes that all the `.json` and `.pickle` files in
     the given directory are files containing a `QubitNetwork` object in
     appropriate format.
+
+    Parameters
+    ----------
+    path : string, optional
+        The directory where the net files are searched for.
+        If not given, it defaults to '../data/nets'.
+
+    Attributes
+    ----------
+    path : string
+    files : list of strings
+    nets : list of objects
     """
     def __init__(self, path='../data/nets/'):
         # raise error if path is not a directory

@@ -298,7 +298,7 @@ class QubitNetworkModel(QubitNetwork):
                        text=df.index.tolist(),
                        asFigure=True, **kwargs)
         fig.layout.shapes = hline(0, len(self.free_parameters),
-                                    overlay_hlines, dash='dash')
+                                  overlay_hlines, dash='dash')
         fig.data[0].textposition = 'top'
         fig.data[0].textfont = dict(color='white', size=13)
         if asFigure:
