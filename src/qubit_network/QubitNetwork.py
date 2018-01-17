@@ -6,64 +6,9 @@ import numpy as np
 import sympy
 import qutip
 
-
-def pauli_product(*args):
-    """
-    Return sympy.Matrix object representing product of Pauli matrices.
-
-    Examples
-    --------
-    >>> pauli_product(1, 1)
-    Matrix([[0, 0, 0, 1],
-            [0, 0, 1, 0],
-            [0, 1, 0, 0],
-            [1, 0, 0, 0]])
-    """
-    for arg in args:
-        try:
-            if not 0 <= arg <= 3:
-                raise ValueError('Each argument must be between 0 and 3.')
-        except TypeError:
-            raise ValueError('The inputs must be integers.')
-    n_qubits = len(args)
-    sigmas = [qutip.qeye(2), qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
-    output_matrix = [None] * n_qubits
-    for idx, arg in enumerate(args):
-        output_matrix[idx] = sigmas[arg]
-    output_matrix = qutip.tensor(*output_matrix).data.toarray()
-    return sympy.Matrix(output_matrix)
-
-
-def _self_interactions(num_qubits):
-    """Return the indices corresponding to the self-interactions."""
-    interactions = []
-    for qubit in range(num_qubits):
-        for pindex in range(1, 4):
-            term = [0] * num_qubits
-            term[qubit] = pindex
-            interactions.append(tuple(term))
-    return interactions
-
-
-def _pairwise_interactions(num_qubits):
-    """
-    Return the indices corresponding the the pairwise interactions.
-    """
-    interactions = []
-    pairs = itertools.combinations(range(num_qubits), 2)
-    for qubit1, qubit2 in pairs:
-        for pindex1, pindex2 in itertools.product(*[range(1, 4)] * 2):
-            term = [0] * num_qubits
-            term[qubit1] = pindex1
-            term[qubit2] = pindex2
-            interactions.append(tuple(term))
-    return interactions
-
-
-def _self_and_pairwise_interactions(num_qubits):
-    """Return list of all possible one- and two-qubit interactions."""
-    return _self_interactions(num_qubits) + _pairwise_interactions(num_qubits)
-
+from .analytical_conditions import (pauli_product, pauli_basis,
+                                    _self_interactions,
+                                    _self_and_pairwise_interactions)
 
 class QubitNetwork:
     """Compute the Hamiltonian for the qubit network.
@@ -259,10 +204,12 @@ class QubitNetwork:
                     factor += pauli_product(*tuple_)
             self.matrices.append(factor)
 
-    def get_matrix(self):
+    def get_matrix(self, symbolic_paulis=False):
         """Return the Hamiltonian matrix as a sympy matrix object."""
-        # final_matrix = sympy.MatrixSymbol('H', *self.matrices[0].shape)
-        final_matrix = sympy.Matrix(np.zeros(self.matrices[0].shape))
-        for matrix, parameter in zip(self.matrices, self.free_parameters):
-            final_matrix += parameter * matrix
-        return final_matrix
+        if not symbolic_paulis:
+            final_matrix = sympy.Matrix(np.zeros(self.matrices[0].shape))
+            for matrix, parameter in zip(self.matrices, self.free_parameters):
+                final_matrix += parameter * matrix
+            return final_matrix
+        expr = pauli_basis(self.get_matrix())
+        return sympy.simplify(expr)

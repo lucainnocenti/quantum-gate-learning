@@ -7,9 +7,95 @@ import sympy
 from sympy.physics.quantum.tensorproduct import TensorProduct
 from sympy.physics.paulialgebra import Pauli
 import qutip
+from .utils import chop
 
-from .QubitNetwork import _self_and_pairwise_interactions
-from .QubitNetwork import pauli_product
+
+def pauli_product(*args):
+    """
+    Return sympy.Matrix object representing product of Pauli matrices.
+
+    Examples
+    --------
+    >>> pauli_product(1, 1)
+    Matrix([[0, 0, 0, 1],
+            [0, 0, 1, 0],
+            [0, 1, 0, 0],
+            [1, 0, 0, 0]])
+    """
+    for arg in args:
+        try:
+            if not 0 <= arg <= 3:
+                raise ValueError('Each argument must be between 0 and 3.')
+        except TypeError:
+            raise ValueError('The inputs must be integers.')
+    n_qubits = len(args)
+    sigmas = [qutip.qeye(2), qutip.sigmax(), qutip.sigmay(), qutip.sigmaz()]
+    output_matrix = [None] * n_qubits
+    for idx, arg in enumerate(args):
+        output_matrix[idx] = sigmas[arg]
+    output_matrix = qutip.tensor(*output_matrix).data.toarray()
+    return sympy.Matrix(output_matrix)
+
+
+def _self_interactions(num_qubits):
+    """Return the indices corresponding to the self-interactions."""
+    interactions = []
+    for qubit in range(num_qubits):
+        for pindex in range(1, 4):
+            term = [0] * num_qubits
+            term[qubit] = pindex
+            interactions.append(tuple(term))
+    return interactions
+
+
+def _nwise_interactions(num_qubits, n):
+    """Return interaction indices corresponding to n-qubit interactions.
+    """
+    if n > num_qubits:
+        raise ValueError('`n` must be lower than the number of qubits.')
+    interactions = []
+    tuples = itertools.combinations(range(num_qubits), n)
+    for qtuple in tuples:
+        for pindices in itertools.product(*[range(1, 4)] * n):
+            term = [0] * num_qubits
+            for q, p in zip(qtuple, pindices):
+                term[q] = p
+            interactions.append(tuple(term))
+    return interactions
+
+
+def _nwise_diagonal_interactions(num_qubits, n):
+    """All diagonal n-qubit interactions."""
+    all_ints = _nwise_interactions(num_qubits, n)
+    diagonal_ints = [tup for tup in all_ints if is_diagonal_interaction(tup)]
+    return diagonal_ints
+
+
+def _at_most_nwise_interactions(num_qubits, n=None, include_identity=False):
+    """Return interactions between at most n qubits.
+
+    For example, for `n=2` we get all 1- and 2-qubit interactinos.
+    """
+    if n is None:
+        n = num_qubits
+    tuples = sum((_nwise_interactions(num_qubits, n) for n in range(2, n + 1)),
+                 _nwise_interactions(num_qubits, 1))
+    if include_identity:
+        tuples = [(0, ) * num_qubits] + tuples
+    return tuples
+
+
+def _at_most_nwise_diagonal_interactions(num_qubits,
+                                         n=None,
+                                         include_identity=False):
+    """Return diagonal interactions between at most n qubits."""
+    if n is None:
+        n = num_qubits
+    tuples = sum((_nwise_diagonal_interactions(num_qubits, n) for n in range(2, n + 1)),
+                 _nwise_diagonal_interactions(num_qubits, 1))
+    if include_identity:
+        tuples = [(0, ) * num_qubits] + tuples
+    return tuples
 
 
 def J(*args):
@@ -38,7 +124,7 @@ def is_diagonal_interaction(int_tuple):
 
 def pairwise_interactions_indices(num_qubits):
     """List of 1- and 2- qubit interaction terms."""
-    return _self_and_pairwise_interactions(num_qubits)
+    return _at_most_nwise_interactions(num_qubits, 2)
 
 
 def pairwise_diagonal_interactions_indices(num_qubits):
@@ -89,15 +175,15 @@ def commuting_generator(gate, interactions='all'):
     which_interactions = None
     if type(interactions) is str:
         if interactions == 'all':
-            which_interactions = pairwise_interactions_indices(num_qubits)
+            which_interactions = _at_most_nwise_interactions(num_qubits, 2)
         elif interactions == 'diagonal':
-            which_interactions = pairwise_diagonal_interactions_indices(num_qubits)
+            which_interactions = _at_most_nwise_diagonal_interactions(num_qubits, 2)
     if which_interactions is None:
         raise ValueError('which_interactions has not been set yet.')
     # make actual parametrized Hamiltonian
     general_ham = indices_to_hamiltonian(which_interactions)
     # compute principal hamiltonian
-    principal_ham = (-1j * scipy.linalg.logm(gate)).real
+    principal_ham = chop(-1j * scipy.linalg.logm(gate))
     # impose commutativity
     return impose_commutativity(general_ham, principal_ham)
 
@@ -133,7 +219,7 @@ def symbolic_pauli_product(*args, as_tensor_product=False):
     for pos, arg in enumerate(args):
         if arg != 0:
             out_expr *= sympy.Symbol(['X', 'Y', 'Z'][arg - 1]
-                                     + '_' + str(pos), commutative=False)
+                                     + '_' + str(pos + 1), commutative=False)
     return out_expr
 
 
@@ -141,7 +227,7 @@ def pauli_basis(matrix, which_coefficients='all'):
     """Take sympy matrix and decompose in terms of Pauli matrices."""
     num_qubits = sympy.log(matrix.shape[0], 2)
     if which_coefficients == 'all':
-        coefficients = pairwise_interactions_indices(num_qubits)
+        coefficients = _at_most_nwise_interactions(num_qubits)
     out_expr = sympy.Integer(0)
     for coefficient in coefficients:
         out_expr += (get_pauli_coefficient(matrix, coefficient)
