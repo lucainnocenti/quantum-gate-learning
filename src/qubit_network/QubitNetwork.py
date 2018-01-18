@@ -8,7 +8,7 @@ import qutip
 
 from .analytical_conditions import (pauli_product, pauli_basis,
                                     _self_interactions,
-                                    _self_and_pairwise_interactions)
+                                    _at_most_nwise_interactions)
 
 class QubitNetwork:
     """Compute the Hamiltonian for the qubit network.
@@ -125,11 +125,11 @@ class QubitNetwork:
             self.num_qubits = num_qubits
 
         if interactions == 'all':
-            self.interactions = _self_and_pairwise_interactions(num_qubits)
+            self.interactions = _at_most_nwise_interactions(num_qubits, 2)
         # a tuple of the kind `('all', ((1, 1), (2, 2)))` means that all
         # XX and YY interactions, and no others, should be used.
         elif isinstance(interactions, tuple) and interactions[0] == 'all':
-            _interactions = _self_and_pairwise_interactions(num_qubits)
+            _interactions = _at_most_nwise_interactions(num_qubits, 2)
             self.interactions = []
             # filter list of interactions using given filter
             mask = [sorted(tup) for tup in interactions[1]]
