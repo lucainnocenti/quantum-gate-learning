@@ -48,7 +48,7 @@ class QubitNetwork:
     Attributes
     ----------
     num_qubits : int
-    matrices : ndarray
+    matrices : list of sympy matrices
     free_parameters : list of sympy objects
     interactions
     net_topology
