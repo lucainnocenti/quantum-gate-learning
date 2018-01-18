@@ -596,7 +596,14 @@ class NetsDataFolder:
 
     def __getitem__(self, key):
         try:
-            return self.nets[key]
+            if isinstance(key, slice):
+                self.nets = self.nets[key]
+                return self
+            elif isinstance(key, (list, tuple)):
+                self.nets = [self.nets[idx] for idx in key]
+                return self
+            else:
+                return self.nets[key]
         # if numbered indexing didn't work, we try assuming  `key` is
         # a string, and look for matching net names.
         except TypeError:
