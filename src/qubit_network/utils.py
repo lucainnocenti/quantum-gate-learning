@@ -1,6 +1,7 @@
 """
 A collection of utility functions not yet categorized.
 """
+import os
 from collections import OrderedDict
 import json
 import numpy as np
@@ -267,3 +268,8 @@ def custom_dataframe_sort(key=None, reverse=False, cmp=None):
         ]
 
     return sorter
+
+
+def getext(filename):
+    """Extract file extension from full path (excluding the dot)."""
+    return os.path.splitext(filename)[1][1:]

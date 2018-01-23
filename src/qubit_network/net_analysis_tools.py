@@ -16,7 +16,7 @@ import qutip
 
 from .QubitNetwork import QubitNetwork
 from .model import QubitNetworkModel, QubitNetworkGateModel
-from .utils import chop
+from .utils import chop, getext
 
 
 def group_similar_elements(numbers, eps=1e-3):
@@ -435,31 +435,26 @@ class NetDataFile:
     ----------
     path : string
         Path of the data file.
-
     Attributes
     ----------
     path : string
-        Full path.
-    full_name : string
-        Name of file, included extension.
-    name : string
-        Name of file, without extension.
-    ext : string
-        File extension (usually 'pickle' or 'json')
-    _data : QubitNetworkGateModel object
-        This is loaded via `_load` from file.
+        Full path of the file.
+    data : QubitNetworkGateModel object
+        This is loaded via `_load` from file. The actual content is in
+        the internal `_data` attribute, this one can be used to load
+        the content if it wasn't already loaded. Same for `opt_data`
+        and `_opt_data`.
+    opt_data : dict
     """
     def __init__(self, path):
         self.path = path
-        self.full_name = os.path.split(path)[1]
-        self.name, self.ext = os.path.splitext(self.full_name)
-        # the above returns something like `.pickle` instead of `pickle`
-        self.ext = self.ext[1:]
+        self.name = os.path.splitext(os.path.split(self.path)[1])[0]
         # the actual `QubitNetwork` object is only loaded when required
         self._data = None
+        self._opt_data = None
 
     def __repr__(self):
-        return self.name + ' (' + self.ext + ')'
+        return self.name + ' (' + getext(self.path) + ')'
 
     def __getattr__(self, value):
         return getattr(self.data, value)
@@ -470,7 +465,24 @@ class NetDataFile:
 
         If the data was already loaded, it is loaded again.
         """
-        self._data = load_network_from_file(self.path, fmt=self.ext)
+        ext = getext(self.path)
+        if ext != 'pickle':
+            raise ValueError(
+                'Only pickle files supported.\n{} is not pickle.'.format(ext))
+        # self._data = load_network_from_file(self.path, fmt=self.ext)
+        with open(self.path, 'rb') as file:
+            data = pickle.load(file)
+        if 'J' in data:
+            return _load_network_from_pickle_old(data)
+        # otherwise we can just use `sympy_model`:
+        net_data = data['net_data']
+        opt_data = data['optimization_data']
+        model = QubitNetworkGateModel(sympy_expr=net_data['sympy_model'],
+                                      target_gate=opt_data['target_gate'],
+                                      free_parameters_order=net_data['free_parameters'],
+                                      initial_values=opt_data['final_interactions'])
+        self._data = model
+        self._opt_data = opt_data
 
     def get_target_gate(self):
         """
@@ -484,6 +496,9 @@ class NetDataFile:
         else:
             return self.name.split('_')[0]
 
+    def get_fidelity(self, n_samples=40):
+        return self.data.fidelity_test(n_samples=n_samples)
+
     @property
     def data(self):
         """
@@ -492,6 +507,12 @@ class NetDataFile:
         if self._data is None:
             self._load()
         return self._data
+
+    @property
+    def opt_data(self):
+        if self._data is None:
+            self._load()
+        return self._opt_data
 
     def _get_interactions_old_style(self):
         data = self.data
@@ -522,9 +543,6 @@ class NetDataFile:
             'value': values
         }).set_index('interaction')
 
-    def view_fidelity(self, n_samples=40):
-        return self.data.fidelity_test(n_samples=n_samples)
-
 
 class NetsDataFolder:
     """
@@ -544,38 +562,39 @@ class NetsDataFolder:
     ----------
     path : string
     files : list of strings
-    nets : list of objects
+    nets : list of NetDataFile objects
     """
-    def __init__(self, path='../data/nets/'):
+
+    def __init__(self, path_or_files='../data/nets/'):
+        if isinstance(path_or_files, str):
+            self._load_from_dir(path_or_files)
+        elif isinstance(path_or_files, (list, tuple)):
+            self._load_from_file_list(path_or_files)
+
+    def _load_from_dir(self, path):
+        # ensure tha path is of the form 'whatever/'
+        if path[-1] != '/':
+            path += '/'
         # raise error if path is not a directory
         if not os.path.isdir(path):
             raise ValueError('path must be a valid directory.')
         self.path = path
-        # load json and pickle files in path
-        self.files = {
-            'json': glob.glob(path + '*.json'),
-            'pickle': glob.glob(path + '*.pickle')
-        }
-        nets_list = self.get_unique_filenames()
+        # load pickle files in path
+        self.files = glob.glob(path + '*.pickle')
         # raise error if no json and pickle files are found
-        if len(nets_list) == 0:
+        if len(self.files) == 0:
             raise FileNotFoundError('No valid data files found in '
                                     '{}.'.format(path))
         # for each data file associate a `NetDataFile` object, and store
         # the collection of such objects in `self.nets`.
         self.nets = []
-        def get_gate(name):
-            name = os.path.splitext(os.path.split(name)[1])[0]
-            if '_' in name:
-                return name.split('_')[0]
-            else:
-                return name
-        for net_name in sorted(nets_list, key=get_gate):
-            if net_name + '.pickle' in self.files['pickle']:
-                new_net = NetDataFile(net_name + '.pickle')
-            else:
-                new_net = NetDataFile(net_name + '.json')
-            self.nets.append(new_net)
+        for file_ in self.files:
+            self.nets.append(NetDataFile(file_))
+
+    def _load_from_file_list(self, files_list):
+        self.path = None
+        self.files = list(files_list)
+        self.nets = [NetDataFile(file_) for file_ in files_list]
 
     def __repr__(self):
         return self._repr_dataframe().__repr__()
@@ -592,12 +611,13 @@ class NetsDataFolder:
             'names': names
         })[['target gates', 'names']]
         # return formatted string
-        return df
+        return df.sort_values(by=['names']).reset_index(drop=True)
 
     def __getitem__(self, key):
         try:
             if isinstance(key, slice):
                 self.nets = self.nets[key]
+                self.files = self.files[key]
                 return self
             elif isinstance(key, (list, tuple)):
                 self.nets = [self.nets[idx] for idx in key]
@@ -635,8 +655,7 @@ class NetsDataFolder:
         Simple wildcard matching provided by `fnmatch.filter` is used.
         """
         new_data = NetsDataFolder(self.path)
-        new_data.files['json'] = fnmatch.filter(self.files['json'], '*/' + pat)
-        new_data.files['pickle'] = fnmatch.filter(self.files['pickle'], '*/' + pat)
+        new_data.files = fnmatch.filter(self.files, '*/' + pat)
         new_data.nets = [net for net in self.nets
                          if fnmatch.fnmatch(net.name, pat)]
         return new_data
@@ -645,11 +664,8 @@ class NetsDataFolder:
         #     if net.name in names:
         #         yield net
 
-
-    def get_unique_filenames(self):
-        nets_list = sum(self.files.values(), [])
-        nets_list = set(os.path.splitext(name)[0] for name in nets_list)
-        return list(nets_list)
+    def get_filenames(self):
+        return [os.path.splitext(name)[0] for name in self.files]
 
     def reload(self):
         self = NetsDataFolder(self.path)

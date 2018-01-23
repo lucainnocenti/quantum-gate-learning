@@ -116,6 +116,8 @@ class Optimizer:
     log
     """
     # pylint: disable=too-many-instance-attributes
+    _in_terminal = False
+
     def __init__(self, net,
                  learning_rate=None, decay_rate=None,
                  training_dataset_size=10,
@@ -123,7 +125,12 @@ class Optimizer:
                  batch_size=None,
                  n_epochs=None,
                  target_gate=None,
-                 sgd_method='momentum'):
+                 sgd_method='momentum',
+                 headless=False):
+        # use headless to suppress printed messages (like you may want
+        # to when running the code in a script)
+        if headless:
+            self._in_terminal = True
         # the net parameter can be a QubitNetwork object or a str
         self.net = Optimizer._load_net(net)
         self.net.target_gate = target_gate
@@ -276,7 +283,8 @@ class Optimizer:
             import pickle
             with open(file, 'wb') as fp:
                 pickle.dump(data_to_save, fp)
-            print('Successfully saved to {}'.format(file))
+            if not self._in_terminal:
+                print('Successfully saved to {}'.format(file))
         else:
             raise ValueError('Only saving to pickle is supported.')
 
@@ -372,7 +380,8 @@ class Optimizer:
         batch_end = (self.vars['index'] + 1) * batch_size
         train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
         train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
-        print('Compiling model ...', end='')
+        if not self._in_terminal:
+            print('Compiling model ...', end='')
         self.train_model = theano.function(
             inputs=[self.vars['index']],
             outputs=self.cost,
@@ -391,7 +400,8 @@ class Optimizer:
             updates=None,
             givens={self.net.inputs: self.vars['test_inputs'],
                     self.net.outputs: self.vars['test_outputs']})
-        print(' done.')
+        if not self._in_terminal:
+            print(' done.')
 
     def _run(self, save_parameters=True, len_shown_history=200):
         # generate testing states
@@ -414,10 +424,12 @@ class Optimizer:
             self.log['n_epoch'] = n_epoch
             self.train_epoch()
             self.test_epoch(save_parameters=save_parameters)
-            self._update_fig(len_shown_history)
+            if not self._in_terminal:
+                self._update_fig(len_shown_history)
             # stop if fidelity 1 is obtained
             if self.log['fidelities'][n_epoch] == 1:
-                print('Fidelity 1 obtained, stopping.')
+                if not self._in_terminal:
+                    print('Fidelity 1 obtained, stopping.')
                 break
             # update learning rate
             self.vars['learning_rate'].set_value(
@@ -428,6 +440,13 @@ class Optimizer:
             save_after=None):
         """
         Start the optimization.
+
+        By default, a dynamical plot is drawn showing the fidelity
+        at each epoch, and then when the training is finished a final
+        plot showing the list of fidelities at each epoch. Messages
+        noting various stages of the computation are also printed.
+        To suppress all of this output use the `headless=True` parameter
+        when initialising the `Optimizer` instance.
 
         Parameters
         ----------
