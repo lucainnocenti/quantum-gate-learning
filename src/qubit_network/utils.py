@@ -246,6 +246,7 @@ def chop(arr, eps=1e-5):
         return _arr
 
 
+    """Change the global phase to make the top-left element real."""
 def transpose(list_of_lists):
     return list(map(list, zip(*list_of_lists)))
 

@@ -16,7 +16,7 @@ import qutip
 
 from .QubitNetwork import QubitNetwork
 from .model import QubitNetworkModel, QubitNetworkGateModel
-from .utils import chop, getext
+from .utils import chop, getext, normalize_phase
 
 
 def group_similar_elements(numbers, eps=1e-3):
@@ -51,11 +51,6 @@ def vanishing_elements(net, eps=1e-4):
     Jvalues = net.J.get_value()
     small_elems = np.where(np.abs(Jvalues) < eps)[0]
     return [net.J_index_to_interaction(idx) for idx in small_elems]
-
-
-def normalize_phase(gate):
-    """Change the global phase to make the top-left element real."""
-    return gate * np.exp(-1j * np.angle(gate[0, 0]))
 
 
 def trace_ancillae_and_normalize(net, num_system_qubits=None, eps=1e-4):
