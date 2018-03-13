@@ -10,9 +10,12 @@ import qutip
 from .utils import chop
 
 
-def pauli_product(*args):
+def pauli_product(*args, return_sympy_obj=True):
     """
-    Return sympy.Matrix object representing product of Pauli matrices.
+    Returns
+    -------
+    Either a `sympy.Matrix` or a `numpy.ndarray`, representing the requested
+    product of Pauli matrices.
 
     Examples
     --------
@@ -34,7 +37,10 @@ def pauli_product(*args):
     for idx, arg in enumerate(args):
         output_matrix[idx] = sigmas[arg]
     output_matrix = qutip.tensor(*output_matrix).data.toarray()
-    return sympy.Matrix(output_matrix)
+    if return_sympy_obj:
+        return sympy.Matrix(output_matrix)
+    else:
+        return output_matrix
 
 
 def _self_interactions(num_qubits):
