@@ -2,6 +2,7 @@
 Compute the base object representing the qubit network.
 """
 import itertools
+import time
 import numpy as np
 import sympy
 import qutip
@@ -9,6 +10,15 @@ import qutip
 from .analytical_conditions import (pauli_product, pauli_basis,
                                     _self_interactions,
                                     _at_most_nwise_interactions)
+
+DEBUG_PRINT = True
+
+
+def _print(text):
+    if DEBUG_PRINT:
+        hour = time.strftime("%H:%M:%S\t", time.gmtime())
+        print(hour + str(text))
+
 
 class QubitNetwork:
     """Compute the Hamiltonian for the qubit network.
@@ -60,6 +70,7 @@ class QubitNetwork:
                  free_parameters_order=None,
                  interactions=None,
                  net_topology=None):
+        _print("I'm inside QubitNetwork")
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
         self.matrices = None  # matrix coefficients for free parameters
@@ -83,6 +94,7 @@ class QubitNetwork:
         """
         Extract free parameters and matrix coefficients from sympy expr.
         """
+        _print("Trying to parse from sympy expression.")
         try:
             if free_parameters_order is not None:
                 self.free_parameters = free_parameters_order
@@ -109,13 +121,17 @@ class QubitNetwork:
         being used (as opposite to what happens when the Hamiltonian is
         computed from a sympy expression).
         """
+        _print("Trying to parse from interactions...")
         def make_symbols_and_matrices(interactions):
             self.free_parameters = []
             self.matrices = []
-            for interaction in interactions:
+            import progressbar
+            bar = progressbar.ProgressBar()
+            for interaction in bar(interactions):
                 # create free parameter sympy symbol for interaction
                 new_symb = 'J' + ''.join(str(idx) for idx in interaction)
                 self.free_parameters.append(sympy.Symbol(new_symb))
+                pauli_product(*interaction)
                 # create matrix coefficient for symbol just created
                 self.matrices.append(pauli_product(*interaction))
         # store number of qubits in class
@@ -137,12 +153,18 @@ class QubitNetwork:
                 no_zeros = sorted([idx for idx in interaction if idx != 0])
                 if no_zeros in mask:
                     self.interactions.append(interaction)
-        elif isinstance(interactions, list):
-            self.interactions = interactions
+        # Otherwise we assume that the input is a list of tuples, with each 
+        # representing an n-qubit interaction, like: `[(1, 1), (1, 2), (3, 0)]`
+        elif isinstance(interactions, (list, tuple)):
+            self.interactions = list(interactions)
+        else:
+            raise ValueError('Value of parameter `interaction` not valid.')
         # store values of symbols and matrices for chosen interactions
         if len(self.interactions) == 0:
             raise ValueError('No interaction value has been specified.')
+        _print('Starting to build the sympy matrix...')
         make_symbols_and_matrices(self.interactions)
+        _print("Finished parsing from interactions.")
 
     def _parse_from_topology(self, num_qubits, topology):
         """
@@ -160,6 +182,7 @@ class QubitNetwork:
             (0, 1, 2): c}
         where `a`, `b` and `c` are `sympy.Symbol` instances.
         """
+        _print("Trying to parse from topology.")
         self.num_qubits = num_qubits
         self.net_topology = topology
         # ensure that all values are sympy symbols
