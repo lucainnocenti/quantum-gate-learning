@@ -246,7 +246,11 @@ def chop(arr, eps=1e-5):
         return _arr
 
 
+def normalize_phase(gate):
     """Change the global phase to make the top-left element real."""
+    return gate * np.exp(-1j * np.angle(gate[0, 0]))
+
+
 def transpose(list_of_lists):
     return list(map(list, zip(*list_of_lists)))
 
