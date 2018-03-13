@@ -11,7 +11,7 @@ from .analytical_conditions import (pauli_product, pauli_basis,
                                     _self_interactions,
                                     _at_most_nwise_interactions)
 
-DEBUG_PRINT = True
+DEBUG_PRINT = 0
 
 
 def _print(text):
@@ -123,17 +123,22 @@ class QubitNetwork:
         """
         _print("Trying to parse from interactions...")
         def make_symbols_and_matrices(interactions):
-            self.free_parameters = []
-            self.matrices = []
-            import progressbar
-            bar = progressbar.ProgressBar()
+            free_parameters = []
+            matrices = []
+            if DEBUG_PRINT:
+                import progressbar
+                bar = progressbar.ProgressBar()
+            else:
+                bar = lambda x: x
             for interaction in bar(interactions):
                 # create free parameter sympy symbol for interaction
                 new_symb = 'J' + ''.join(str(idx) for idx in interaction)
-                self.free_parameters.append(sympy.Symbol(new_symb))
-                pauli_product(*interaction)
+                free_parameters.append(sympy.Symbol(new_symb))
                 # create matrix coefficient for symbol just created
-                self.matrices.append(pauli_product(*interaction))
+                matrices.append(pauli_product(*interaction,
+                                              return_sympy_obj=False))
+            return free_parameters, matrices
+
         # store number of qubits in class
         if num_qubits is None:
             raise ValueError('The number of qubits must be given.')
@@ -162,8 +167,10 @@ class QubitNetwork:
         # store values of symbols and matrices for chosen interactions
         if len(self.interactions) == 0:
             raise ValueError('No interaction value has been specified.')
-        _print('Starting to build the sympy matrix...')
-        make_symbols_and_matrices(self.interactions)
+
+        self.free_parameters, self.matrices = make_symbols_and_matrices(
+            self.interactions)
+
         _print("Finished parsing from interactions.")
 
     def _parse_from_topology(self, num_qubits, topology):
@@ -227,8 +234,12 @@ class QubitNetwork:
                     factor += pauli_product(*tuple_)
             self.matrices.append(factor)
 
-    def get_matrix(self, symbolic_paulis=False):
+
+    def get_matrix(self, symbolic_paulis=False, sure=False):
         """Return the Hamiltonian matrix as a sympy matrix object."""
+        if self.num_qubits >= 5 and not sure:
+            raise ValueError('For more than 5 qubits computing this can be'
+                             ' very slow, are you sure you want to do it?')
         if not symbolic_paulis:
             final_matrix = sympy.Matrix(np.zeros(self.matrices[0].shape))
             for matrix, parameter in zip(self.matrices, self.free_parameters):
