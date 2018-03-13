@@ -262,27 +262,6 @@ class QubitNetworkModel(QubitNetwork):
             'interaction': interactions,
             'value': values
         }).set_index('interaction')
-        # OLD STUFF, POSSIBLY OBSOLETE
-        parameters = self.get_interactions_with_Js()
-        qubits = []
-        directions = []
-        values = []
-        for key, value in parameters.items():
-            try:
-                qubits.append(tuple(key[0]))
-            except TypeError:
-                qubits.append((key[0], ))
-            directions.append(key[1])
-            values.append(value)
-
-        pars_df = pd.DataFrame({
-            'qubits': qubits,
-            'directions': directions,
-            'values': values
-        }).set_index(['qubits', 'directions']).sort_index()
-        if stringify_index:
-            pars_df.index = pars_df.index.map(str)
-        return pars_df
 
     def plot_net_parameters(self, sort_index=True, plotly_online=False,
                             mode='lines+markers+text',
