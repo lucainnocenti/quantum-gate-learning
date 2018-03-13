@@ -3,6 +3,7 @@ Compute the base object representing the qubit network.
 """
 import itertools
 import time
+import logging
 import numpy as np
 import sympy
 import qutip
@@ -10,14 +11,6 @@ import qutip
 from .analytical_conditions import (pauli_product, pauli_basis,
                                     _self_interactions,
                                     _at_most_nwise_interactions)
-
-DEBUG_PRINT = 0
-
-
-def _print(text):
-    if DEBUG_PRINT:
-        hour = time.strftime("%H:%M:%S\t", time.gmtime())
-        print(hour + str(text))
 
 
 class QubitNetwork:
@@ -70,7 +63,7 @@ class QubitNetwork:
                  free_parameters_order=None,
                  interactions=None,
                  net_topology=None):
-        _print("I'm inside QubitNetwork")
+        logging.info("I'm inside QubitNetwork")
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
         self.matrices = None  # matrix coefficients for free parameters
@@ -94,7 +87,7 @@ class QubitNetwork:
         """
         Extract free parameters and matrix coefficients from sympy expr.
         """
-        _print("Trying to parse from sympy expression.")
+        logging.info("Trying to parse from sympy expression.")
         try:
             if free_parameters_order is not None:
                 self.free_parameters = free_parameters_order
@@ -121,16 +114,11 @@ class QubitNetwork:
         being used (as opposite to what happens when the Hamiltonian is
         computed from a sympy expression).
         """
-        _print("Trying to parse from interactions...")
+        logging.info("Trying to parse from interactions...")
         def make_symbols_and_matrices(interactions):
             free_parameters = []
             matrices = []
-            if DEBUG_PRINT:
-                import progressbar
-                bar = progressbar.ProgressBar()
-            else:
-                bar = lambda x: x
-            for interaction in bar(interactions):
+            for interaction in interactions:
                 # create free parameter sympy symbol for interaction
                 new_symb = 'J' + ''.join(str(idx) for idx in interaction)
                 free_parameters.append(sympy.Symbol(new_symb))
@@ -171,7 +159,7 @@ class QubitNetwork:
         self.free_parameters, self.matrices = make_symbols_and_matrices(
             self.interactions)
 
-        _print("Finished parsing from interactions.")
+        logging.info("Finished parsing from interactions.")
 
     def _parse_from_topology(self, num_qubits, topology):
         """
@@ -189,7 +177,7 @@ class QubitNetwork:
             (0, 1, 2): c}
         where `a`, `b` and `c` are `sympy.Symbol` instances.
         """
-        _print("Trying to parse from topology.")
+        logging.info("Trying to parse from topology.")
         self.num_qubits = num_qubits
         self.net_topology = topology
         # ensure that all values are sympy symbols

@@ -1,5 +1,6 @@
 import os
 import numbers
+import logging
 import time
 
 import sympy
@@ -18,14 +19,6 @@ import seaborn as sns
 from .utils import complex2bigreal
 from .QubitNetwork import QubitNetwork
 from .theano_qutils import TheanoQstates
-
-DEBUG_PRINT = True
-
-
-def _print(text):
-    if DEBUG_PRINT:
-        hour = time.strftime("%H:%M:%S\t", time.gmtime())
-        print(hour + str(text))
 
 
 def _random_input_states(num_states, num_qubits):
@@ -108,20 +101,20 @@ class QubitNetworkModel(QubitNetwork):
                  free_parameters_order=None,
                  initial_values=None):
         # Initialize `QubitNetwork` parent
-        _print('Starting QubitNetwork initialization.')
+        logging.info('Starting QubitNetwork initialization.')
         super().__init__(num_qubits=num_qubits,
                          interactions=interactions,
                          net_topology=net_topology,
                          sympy_expr=sympy_expr,
                          free_parameters_order=free_parameters_order)
         # attributes initialization
-        _print('Starting to set initial values.')
+        logging.info('Starting to set initial values.')
         self.initial_values = self._set_initial_values(initial_values)
-        # this line takes ~1 sec
-        _print('Starting to compile computational graph.')
-        _print(self.matrices[0])
+        # The graph is computed starting from the content of `self.matrices`
+        # and  `self.initial_values`
+        logging.info('Starting to compile computational graph.')
         self.parameters, self.hamiltonian_model = self._build_theano_graph()
-        _print('Finished compiling computational graph.')
+        logging.info('Finished compiling computational graph.')
         # self.inputs and self.outputs are the holders for the training/testing
         # inputs and corresponding output states. They are used to build
         # the theano expression for the `fidelity`.
@@ -215,7 +208,9 @@ class QubitNetworkModel(QubitNetwork):
             borrow=True  # still not sure what this does
         )
         parameters.set_value(self.initial_values)
-        # multiply variables with matrix coefficients
+        # multiply variables with matrix coefficients. This takes each element
+        # of `self.matrices` and converts into bigreal form (and to a numpy
+        # array if it wasn't alredy).
         bigreal_matrices = self._get_bigreal_matrices()
         theano_graph = T.tensordot(parameters, bigreal_matrices, axes=1)
         # from IPython.core.debugger import set_trace; set_trace()
