@@ -1,5 +1,7 @@
 import os
 import numbers
+import time
+
 import sympy
 import scipy
 import pandas as pd
@@ -16,6 +18,14 @@ import seaborn as sns
 from .utils import complex2bigreal
 from .QubitNetwork import QubitNetwork
 from .theano_qutils import TheanoQstates
+
+DEBUG_PRINT = True
+
+
+def _print(text):
+    if DEBUG_PRINT:
+        hour = time.strftime("%H:%M:%S\t", time.gmtime())
+        print(hour + str(text))
 
 
 def _random_input_states(num_states, num_qubits):
@@ -98,15 +108,20 @@ class QubitNetworkModel(QubitNetwork):
                  free_parameters_order=None,
                  initial_values=None):
         # Initialize `QubitNetwork` parent
+        _print('Starting QubitNetwork initialization.')
         super().__init__(num_qubits=num_qubits,
                          interactions=interactions,
                          net_topology=net_topology,
                          sympy_expr=sympy_expr,
                          free_parameters_order=free_parameters_order)
         # attributes initialization
+        _print('Starting to set initial values.')
         self.initial_values = self._set_initial_values(initial_values)
         # this line takes ~1 sec
+        _print('Starting to compile computational graph.')
+        _print(self.matrices[0])
         self.parameters, self.hamiltonian_model = self._build_theano_graph()
+        _print('Finished compiling computational graph.')
         # self.inputs and self.outputs are the holders for the training/testing
         # inputs and corresponding output states. They are used to build
         # the theano expression for the `fidelity`.
