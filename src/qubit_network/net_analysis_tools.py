@@ -104,35 +104,6 @@ def resave_all_pickle_as_json(path=None):
                 raise
 
 
-def print_saved_nets_info(path=None):
-    """Create table summarizing all the `.pickle` net files in `path`"""
-    import glob
-    import qubit_network as qn
-    import pandas as pd
-
-    if path is None:
-        path = r'../data/nets/'
-
-    all_nets = glob.glob(path + '*.pickle')
-    data = []
-
-    for net_file in all_nets:
-        net = qn.load_network_from_file(net_file)
-
-        try:
-            data.append({})
-            data[-1]['name'] = os.path.splitext(os.path.basename(net_file))[0]
-            data[-1]['num_qubits'] = net.num_qubits
-            data[-1]['num_ancillae'] = net.num_ancillae
-            data[-1]['fid'] = net.fidelity_test(n_samples=100)
-        except:
-            print('An error was raised during processing of {}'.format(
-                net_file))
-            continue
-
-    return pd.DataFrame(data)[['name', 'num_qubits', 'num_ancillae', 'fid']]
-
-
 # ----------------------------------------------------------------
 # Display gate matrices.
 # ----------------------------------------------------------------
@@ -146,7 +117,7 @@ def plot_gate(net,
 
     Parameters
     ----------
-    net : QubitNetwork or matrix_like, optional
+    net : QubitNetworkGateModel or matrix_like, optional
         If `net` is a `QubitNetwork` instance, than `net.get_current_gate` is
         used to extract the matrix of the implemented gate.
         In instead `net` is given dircetly as a matrix, we only plot it with
@@ -174,7 +145,7 @@ def plot_gate(net,
     else:
         raise ValueError('The possible values are abs, real, imag.')
 
-    f, ax = plt.subplots(figsize=(10, 10))
+    _, ax = plt.subplots(figsize=(10, 10))
     ax = sns.heatmap(gate,
                      square=True, annot=annot, fmt=fmt,
                      linewidth=1, cbar=cbar)
