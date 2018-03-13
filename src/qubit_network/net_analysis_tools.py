@@ -299,56 +299,71 @@ def fidelity_vs_J(net):
 # Plotting and handling visualization of net parameters
 # ----------------------------------------------------------------
 
-def dataframe_parameters_to_net(df, column_index, net=None):
-    """Load back the parameters to the net.
+# def dataframe_parameters_to_net(df, column_index, net=None):
+#     """Load back the parameters to the net.
 
-    The DataFrame is expected to have the structure producd
-    by `net_parameters_to_dataframe` with the parameter
-    `stringify_index=True`.
-    """
-    # if the index is not a MultiIndex, it probably means it was
-    # stringified. Convert it back into a MultiIndex which more closely
-    # resembles the format we want.
-    if isinstance(df.index, pd.Index):
-        keys = df.index.map(eval).values
-    else:
-        keys = df.index.values
-    # in the QubitNetwork object the self-interaction
-    # qubit numbers are integeres, not tuples with a
-    # single integer.
-    for idx in range(len(keys)):
-        keys[idx] = list(keys[idx])
-        if len(keys[idx][0]) == 1:
-            keys[idx][0] = keys[idx][0][0]
-    keys = [tuple(item) for item in keys]
-    # get the interaction values we are interested in
-    interactions_values = df.iloc[:, column_index].values
-    # now we can effectively load the interactions
-    # and corresponding values into the net (and hope
-    # for the best).
-    if net is None:
-        # get maximum qubit index
-        num_qubits = max(
-            max(key[0]) if isinstance(key[0], tuple) else key[0]
-            for key in keys)
-        num_qubits += 1
-        net = QubitNetwork(
-            num_qubits,
-            system_qubits=num_qubits,
-            interactions=keys,
-            J=interactions_values)
-    else:
-        net.interactions = keys
-        net.J.set_value(interactions_values)
+#     The DataFrame is expected to have the structure producd
+#     by `net_parameters_to_dataframe` with the parameter
+#     `stringify_index=True`.
+#     """
+#     # if the index is not a MultiIndex, it probably means it was
+#     # stringified. Convert it back into a MultiIndex which more closely
+#     # resembles the format we want.
+#     if isinstance(df.index, pd.Index):
+#         keys = df.index.map(eval).values
+#     else:
+#         keys = df.index.values
+#     # in the QubitNetwork object the self-interaction
+#     # qubit numbers are integeres, not tuples with a
+#     # single integer.
+#     for idx in range(len(keys)):
+#         keys[idx] = list(keys[idx])
+#         if len(keys[idx][0]) == 1:
+#             keys[idx][0] = keys[idx][0][0]
+#     keys = [tuple(item) for item in keys]
+#     # get the interaction values we are interested in
+#     interactions_values = df.iloc[:, column_index].values
+#     # now we can effectively load the interactions
+#     # and corresponding values into the net (and hope
+#     # for the best).
+#     if net is None:
+#         # get maximum qubit index
+#         num_qubits = max(
+#             max(key[0]) if isinstance(key[0], tuple) else key[0]
+#             for key in keys)
+#         num_qubits += 1
+#         net = QubitNetwork(
+#             num_qubits,
+#             system_qubits=num_qubits,
+#             interactions=keys,
+#             J=interactions_values)
+#     else:
+#         net.interactions = keys
+#         net.J.set_value(interactions_values)
 
-    return net
+#     return net
 
 
 # ----------------------------------------------------------------
 # Loading nets from file
 # ----------------------------------------------------------------
 def _load_network_from_pickle_old(data):
-    """Rebuild QubitNetworkModel from old style saved data."""
+    """Rebuild QubitNetworkModel from old style saved data.
+    
+    Parameters
+    ----------
+    data : dict
+        Data loaded (usually) from a pickle file. It is expected to contain
+        at least the 'J' key.
+    Returns
+    -------
+    Pair of dicts `net_data` and `opt_data`.
+    - `net_data` is to contain the model, typically in the form of a
+        QubitNetworkGateModel object.
+    - `opt_data` contains data concerning the optimization of the network. This
+        is actually returned as a None because the optimization data was not
+        saved in old nets.
+    """
     # from IPython.core.debugger import set_trace; set_trace()
     topology = data.get('net_topology', None)
     interactions = data.get('interactions', None)
@@ -368,14 +383,15 @@ def _load_network_from_pickle_old(data):
         interactions = new_ints
 
     ints_values = data.get('J')
-    net = QubitNetworkModel(
+    model = QubitNetworkGateModel(
         num_qubits=data['num_qubits'],
         num_system_qubits=data['num_system_qubits'],
         interactions=interactions,
         net_topology=topology,
         target_gate=data['target_gate'],
         initial_values=ints_values)
-    return net
+
+    return model, None
 
 
 def _load_network_from_pickle(filename):
@@ -394,11 +410,13 @@ def _load_network_from_pickle(filename):
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
     opt_data = data['optimization_data']
-    net = QubitNetworkGateModel(sympy_expr=net_data['sympy_model'],
-                                target_gate=opt_data['target_gate'],
-                                free_parameters_order=net_data['free_parameters'],
-                                initial_values=opt_data['final_interactions'])
-    return net
+    model = QubitNetworkGateModel(
+        sympy_expr=net_data['sympy_model'],
+        target_gate=opt_data['target_gate'],
+        free_parameters_order=net_data['free_parameters'],
+        initial_values=opt_data['final_interactions']
+    )
+    return model, opt_data
 
 
 def _load_network_from_json(filename):
@@ -460,24 +478,7 @@ class NetDataFile:
 
         If the data was already loaded, it is loaded again.
         """
-        ext = getext(self.path)
-        if ext != 'pickle':
-            raise ValueError(
-                'Only pickle files supported.\n{} is not pickle.'.format(ext))
-        # self._data = load_network_from_file(self.path, fmt=self.ext)
-        with open(self.path, 'rb') as file:
-            data = pickle.load(file)
-        if 'J' in data:
-            return _load_network_from_pickle_old(data)
-        # otherwise we can just use `sympy_model`:
-        net_data = data['net_data']
-        opt_data = data['optimization_data']
-        model = QubitNetworkGateModel(sympy_expr=net_data['sympy_model'],
-                                      target_gate=opt_data['target_gate'],
-                                      free_parameters_order=net_data['free_parameters'],
-                                      initial_values=opt_data['final_interactions'])
-        self._data = model
-        self._opt_data = opt_data
+        self._data, self._opt_data = load_network_from_file(self.path)
 
     def get_target_gate(self):
         """
@@ -510,7 +511,7 @@ class NetDataFile:
         return self._opt_data
 
     def _get_interactions_old_style(self):
-        data = self.data
+        data = self._data
         topology = data.get('net_topology', None)
         interactions = data.get('interactions', None)
         ints_values = data.get('J')
