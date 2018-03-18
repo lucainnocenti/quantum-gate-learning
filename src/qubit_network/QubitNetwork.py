@@ -26,7 +26,7 @@ class QubitNetwork:
 
     Parameters
     ----------
-    num_qubits : int,
+    num_qubits : int
         Number of qubits in the network.
     sympy_expr : sympy object, optional
         A sympy symbolic matrix object. If given, it directly specifies

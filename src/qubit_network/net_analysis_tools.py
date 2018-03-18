@@ -87,7 +87,6 @@ def project_ancillae(net, ancillae_state):
 def resave_all_pickle_as_json(path=None):
     """Take all `.pickle` files in `path` and resave them as `json` files."""
     import glob
-    import qubit_network as qn
 
     if path is None:
         path = r'../data/nets/'
@@ -97,7 +96,7 @@ def resave_all_pickle_as_json(path=None):
         net_name, net_ext = os.path.splitext(net_path)
         if (net_ext == '.pickle') and (net_name + '.json' not in all_nets):
             try:
-                net = qn.load_network_from_file(net_path)
+                net = load_network_from_file(net_path)
                 net.save_to_file(net_name + '.json', fmt='json')
             except:
                 print('Error while handling {}'.format(net_path))
@@ -109,7 +108,7 @@ def resave_all_pickle_as_json(path=None):
 # ----------------------------------------------------------------
 
 
-def plot_gate(net,
+def plot_gate(net, ptrace=None,
               norm_phase=True, permutation=None, func='abs',
               fmt='1.2f', annot=True, cbar=False,
               hvlines=None):
@@ -122,6 +121,9 @@ def plot_gate(net,
         used to extract the matrix of the implemented gate.
         In instead `net` is given dircetly as a matrix, we only plot it with
         a nice formatting.
+    ptrace : list of ints
+        If not None, the output gate is partial traced before plotting.
+        The value is directly given to `qutip.ptrace`.
     """
     try:
         gate = net.get_current_gate(return_qobj=True)
@@ -133,6 +135,8 @@ def plot_gate(net,
     if permutation is not None:
         gate = gate.permute(permutation)
         gate = normalize_phase(gate)
+    if ptrace is not None:
+        gate = gate.ptrace(ptrace)
 
     gate = gate.data.toarray()
 
@@ -264,55 +268,6 @@ def fidelity_vs_J(net):
         inputs=[states, target_states, xs, index_to_vary],
         outputs=fidelities
     )
-
-
-# ----------------------------------------------------------------
-# Plotting and handling visualization of net parameters
-# ----------------------------------------------------------------
-
-# def dataframe_parameters_to_net(df, column_index, net=None):
-#     """Load back the parameters to the net.
-
-#     The DataFrame is expected to have the structure producd
-#     by `net_parameters_to_dataframe` with the parameter
-#     `stringify_index=True`.
-#     """
-#     # if the index is not a MultiIndex, it probably means it was
-#     # stringified. Convert it back into a MultiIndex which more closely
-#     # resembles the format we want.
-#     if isinstance(df.index, pd.Index):
-#         keys = df.index.map(eval).values
-#     else:
-#         keys = df.index.values
-#     # in the QubitNetwork object the self-interaction
-#     # qubit numbers are integeres, not tuples with a
-#     # single integer.
-#     for idx in range(len(keys)):
-#         keys[idx] = list(keys[idx])
-#         if len(keys[idx][0]) == 1:
-#             keys[idx][0] = keys[idx][0][0]
-#     keys = [tuple(item) for item in keys]
-#     # get the interaction values we are interested in
-#     interactions_values = df.iloc[:, column_index].values
-#     # now we can effectively load the interactions
-#     # and corresponding values into the net (and hope
-#     # for the best).
-#     if net is None:
-#         # get maximum qubit index
-#         num_qubits = max(
-#             max(key[0]) if isinstance(key[0], tuple) else key[0]
-#             for key in keys)
-#         num_qubits += 1
-#         net = QubitNetwork(
-#             num_qubits,
-#             system_qubits=num_qubits,
-#             interactions=keys,
-#             J=interactions_values)
-#     else:
-#         net.interactions = keys
-#         net.J.set_value(interactions_values)
-
-#     return net
 
 
 # ----------------------------------------------------------------
