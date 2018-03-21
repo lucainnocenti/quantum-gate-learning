@@ -1,4 +1,4 @@
-Code and notebooks used to produce the results in presented "*Supervised learning of time-independent Hamiltonians for gate design*" ([arXiv:1803.07119](https://arxiv.org/abs/1803.07119)).
+Code and notebooks used to produce the results presented in "*Supervised learning of time-independent Hamiltonians for gate design*" ([arXiv:1803.07119](https://arxiv.org/abs/1803.07119)).
 ***This repo is still a work in progress***.
 
 # Content
