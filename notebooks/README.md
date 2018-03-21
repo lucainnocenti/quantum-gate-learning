@@ -1,12 +1,12 @@
 # Guide to notebooks
 
+- [toffoli_only_diagonal_from_reduced_expression.ipynb](./toffoli_only_diagonal_from_reduced_expression.ipynb): Contains the code used to train the model for the Toffoli gate with only diagonal pairwise interactions, starting from the reduced expression given by the conditions in the paper. This is also where the plots for the Toffoli in the paper have been generated.
+- [fredkin_only_diagonal_from_reduced_expression.ipynb](./fredkin_only_diagonal_from_reduced_expression.ipynb): As above for the three-qubit Fredkin gate.
+- [doublefredkin.ipynb](./doublefredkin.ipynb): As above for the "double Fredkin" gate.
 - [fredkin_paper.ipynb](./fredkin_paper.ipynb): Notebook with reproduction of results of [Banchi et al](https://www.nature.com/articles/npjqi201619).
 The training functions as used here may be obsolete and not running with the current version of the code.
 - [toffoli_analysis.ipynb](./toffoli_analysis.ipynb): Toffoli implementations with ancillary qubit. This notebook uses old code notation, won't work now.
 - [fredkin_analysis.ipynb](./fredkin_analysis.ipynb): Same as above for Fredkin.
-- [toffoli_only_diagonal_from_reduced_expression.ipynb](./toffoli_only_diagonal_from_reduced_expression.ipynb): Contains the code used to train the model for the Toffoli gate with only diagonal pairwise interactions, starting from the reduced expression given by the conditions in the paper. This is also where the plots for the Toffoli in the paper have been generated.
-- [fredkin_only_diagonal_from_reduced_expression.ipynb](./fredkin_only_diagonal_from_reduced_expression.ipynb): As above for the three-qubit Fredkin gate.
-- [doublefredkin.ipynb](./doublefredkin.ipynb): As above for the "double Fredkin" gate.
 
 # Results stored in net files
 ## 3-qubit gates without ancillae, all interactions
