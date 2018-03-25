@@ -4,7 +4,7 @@ Small collection of thin wrappers around plotly objects.
 import numbers
 
 
-def hline(x0, x1, y, color='white', width=0.1, dash='solid'):
+def hline(x0, x1, y, color='black', width=0.1, dash='solid'):
     # if `y` is a number a single line is returned
     if isinstance(y, numbers.Number):
         shape = dict(

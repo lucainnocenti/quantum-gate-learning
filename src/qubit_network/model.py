@@ -347,11 +347,19 @@ class QubitNetworkGateModel(QubitNetworkModel):
         self.num_system_qubits = None  # number of input/output qubits
         self.target_gate = target_gate
         self.outputs_size = None  # size of complex output ket states
-        # Build the initial state of the ancillae, if there are any
+
+        # If num_system_qubits has not been given, then either there are no
+        # ancillae, or there are ancillae whose number is implicitly given
+        # through the `ancillae_state` parameter
         if num_system_qubits is None:
-            self.num_system_qubits = self.num_qubits
+            if ancillae_state is None:
+                self.num_system_qubits = self.num_qubits
+            else:
+                num_ancillae = int(np.log2(ancillae_state.shape[0]))
+                self.num_system_qubits = self.num_qubits - num_ancillae
         else:
             self.num_system_qubits = num_system_qubits
+        # Initialise the ancillae, if any
         if self.num_system_qubits < self.num_qubits:
             self._initialize_ancillae(ancillae_state)
         # set size of complex output ket states
@@ -363,6 +371,8 @@ class QubitNetworkGateModel(QubitNetworkModel):
         The generated state has every ancillary qubit in the 0 state,
         unless otherwise specified.
         """
+        # the number of system qubits should have already been extracted and
+        # stored in `num_system_qubits`
         num_ancillae = self.num_qubits - self.num_system_qubits
         if ancillae_state is not None:
             raise NotImplementedError('Custom specification of ancillae'
@@ -404,7 +414,6 @@ class QubitNetworkGateModel(QubitNetworkModel):
         ------
         TargetGateNotGivenError if not target gate has been specified.
         """
-        # compute fidelity for case of no ancillae
         if self.target_gate is None:
             raise TargetGateNotGivenError('You must give a target gate'
                                           ' first.')
@@ -432,9 +441,9 @@ class QubitNetworkGateModel(QubitNetworkModel):
             else:
                 dm_out = qutip.ket2dm(Psi_out)
             # compute fidelity
-            fidelity = (psi_in.dag() * target_gate.dag() *
-                        dm_out * target_gate * psi_in)
-            fidelities[idx] = fidelity[0, 0].real
+            # fidelity = (psi_in.dag() * target_gate.dag() *
+            #             dm_out * target_gate * psi_in)
+            fidelities[idx] = qutip.fidelity(target_gate * psi_in, dm_out)
         if return_mean:
             return fidelities.mean()
         else:

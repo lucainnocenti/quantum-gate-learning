@@ -336,11 +336,16 @@ def _load_network_from_pickle(filename):
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
     opt_data = data['optimization_data']
+
+    ancillae_state = net_data['ancillae_state']
+    num_ancillae = int(np.log2(ancillae_state.shape[0]))
+    num_qubits = int(np.log2(net_data['sympy_model'].shape[0]))
     model = QubitNetworkGateModel(
         sympy_expr=net_data['sympy_model'],
         target_gate=opt_data['target_gate'],
         free_parameters_order=net_data['free_parameters'],
-        initial_values=opt_data['final_interactions']
+        initial_values=opt_data['final_interactions'],
+        num_system_qubits=num_qubits - num_ancillae
     )
     return model, opt_data
 
@@ -524,7 +529,7 @@ class NetsDataFolder:
     def _repr_html_(self):
         return self._repr_dataframe()._repr_html_()
 
-    def _repr_dataframe(self):
+    def _repr_dataframe(self, sort=True):
         names = [net.name for net in self.nets]
         target_gates = [net.get_target_gate() for net in self.nets]
         # load sorted data in pandas DataFrame
@@ -533,7 +538,10 @@ class NetsDataFolder:
             'names': names
         })[['target gates', 'names']]
         # return formatted string
-        return df.sort_values(by=['names']).reset_index(drop=True)
+        if sort:
+            return df.sort_values(by=['names']).reset_index(drop=True)
+        else:
+            return df
 
     def __getitem__(self, key):
         try:
@@ -573,8 +581,9 @@ class NetsDataFolder:
     def filter(self, pat):
         """
         Return a subset of the nets in `self.nets` satisfying condition.
-
-        Simple wildcard matching provided by `fnmatch.filter` is used.
+        
+        The returned object is a new `NetsDataFolder` instance.
+        Simple wildcard matching is provided by `fnmatch.filter`.
         """
         new_data = NetsDataFolder(self.path)
         new_data.files = fnmatch.filter(self.files, '*/' + pat)
@@ -594,7 +603,7 @@ class NetsDataFolder:
         return self
 
     def view_fidelities(self, n_samples=40):
-        data = self._repr_dataframe()
+        data = self._repr_dataframe(sort=False)
         fids = [net.fidelity_test(n_samples=n_samples)
                 for net in self.nets]
         data = pd.concat((
@@ -619,7 +628,7 @@ class NetsDataFolder:
             data = pd.concat((data, new_df), axis=1)
         return data
 
-    def plot_parameters(self, joined=True, hlines=None, return_fig=False):
+    def plot_parameters(self, joined=True, hlines=[], return_fig=False):
         """
         Plot an overlay scatter plot of all the nets.
         """
@@ -640,11 +649,10 @@ class NetsDataFolder:
                 trace.update({'connectgaps': False,
                               'mode': 'markers'})
         # put overlay hlines
-        from .plotly_utils import hline
-        if hlines is None:
-            hlines = np.arange(-np.pi, np.pi, np.pi / 2)
-        fig.layout.shapes = hline(0, len(data) - 1,
-                                  hlines, dash='dash')
+        if len(hlines) > 0:
+            from .plotly_utils import hline
+            fig.layout.shapes = hline(0, len(data) - 1,
+                                      hlines, dash='dash')
         # finally draw the damn thing
         if return_fig:
             return fig
