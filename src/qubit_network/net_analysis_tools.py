@@ -163,7 +163,7 @@ def plot_gate(net, ptrace=None,
 # Functions ot plot the fidelity vs J parameters for various random states.
 # ----------------------------------------------------------------
 
-def plot_fidelity_vs_J_live(net, xs, index_to_vary,
+def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
                             states=None, target_states=None,
                             n_states=5):
     """Plot the variation of the fidelity with an interaction parameter.
@@ -178,38 +178,66 @@ def plot_fidelity_vs_J_live(net, xs, index_to_vary,
     Load a pre-trained network from file, and plot the fidelity for a number
     of random input states as a function of the fifth interaction parameter
     `net.J[4]`, testing its values from -20 to 20 at intervals of 0.05:
-    >>> import qubit_network as qn
     >>> import net_analysis_tools as nat
-    >>> net = qn.load_network_from_file('path/to/net.pickle')
+    >>> net = nat.load_network_from_file('path/to/net.pickle')
     >>> nat.plot_fidelity_vs_J_live(net, np.arange(-20, 20, 0.05), 4)
     <output graphics object>
     """
     import copy
     import matplotlib.pyplot as plt
     import theano
-
+    # from IPython.core.debugger import set_trace; set_trace()
     if states is None or target_states is None:
-        states, target_states = net.generate_training_data(size=n_states)
-
+        # states, target_states = net.generate_training_states(n_states)
+        hs_dims = 2**net.num_system_qubits
+        dims = [[2] * net.num_system_qubits, [1] * net.num_system_qubits]
+        states = [qutip.rand_ket_haar(hs_dims, dims=dims) for _ in range(n_states)]
+        # states = np.asarray(states)
+        target_gate = net.target_gate
+        target_states = [target_gate * ket for ket in states]
+        # if there are ancillae, they are added to the inputs
+        if net.num_qubits > net.num_system_qubits:
+            if net.ancillae_state is not None:
+                ancillae = net.ancillae_state
+            else:
+                num_ancillae = net.num_qubits - net.num_system_qubits
+                ancillae = qutip.tensor(*(qutip.basis(2, 0) for _ in range(num_ancillae)))
+            states = [qutip.tensor(state, ancillae) for state in states]
+        # target_states = np.einsum('ij,kj->ki', target_gate, states)
+    # create another instance of model to avoid changing the original one
     _net = copy.deepcopy(net)
-    Js = _net.J.get_value()
-
+    # extract parameters
+    try:
+        pars_ref = _net.parameters
+        pars_values = _net.parameters.get_value()
+    except AttributeError:
+        pars_ref = _net.J
+        pars_values = _net.J.get_value()
+    # initialise figure dat
     fig, ax = plt.subplots(1, 1)
+    # initialise array of fidelities (for all states)
     fidelities = np.zeros(shape=(len(states), len(xs)))
-    for state_idx, (state, target_state) in enumerate(
-            zip(states, target_states)):
-        compute_fidelity = theano.function(
-            inputs=[], outputs=_net.fidelity_1s(state, target_state))
+    # for state_idx, (state, target_state) in enumerate(zip(states, target_states)):
+    import progressbar
+    bar = progressbar.ProgressBar()
+    for idx, x in enumerate(bar(xs)):
+        # we need to copy the array here, otherwise we change the original
+        new_pars = np.array(pars_values)
+        if isinstance(index_to_vary, str) and index_to_vary == 'all':   
+            # in this case the range is intended as a percentage change
+            new_pars *= x
+        else:
+            new_pars[index_to_vary] = x
+        pars_ref.set_value(new_pars)
+        current_gate = _net.get_current_gate()
+        fids = []
+        for state, target_state in zip(states, target_states):
+            out_state = (current_gate * state).ptrace(range(_net.num_system_qubits))
+            fids.append(qutip.fidelity(out_state, target_state))
+        fidelities[:, idx] = fids
 
-        for idx, x in enumerate(xs):
-            new_Js = Js[:]
-            new_Js[index_to_vary] = x
-            _net.J.set_value(new_Js)
-
-            fidelities[state_idx, idx] = compute_fidelity()
-
-        ax.plot(xs, fidelities[state_idx])
-        fig.canvas.draw()
+    ax.plot(xs, fidelities.T)
+    fig.canvas.draw()
 
 
 def fidelity_vs_J(net):
@@ -255,7 +283,10 @@ def fidelity_vs_J(net):
     index_to_vary = T.iscalar('index_to_vary')
 
     def foreach_x(x, index_to_vary, states, target_states):
-        _net.J = T.set_subtensor(_net.J[index_to_vary], x)
+        try:
+            _net.parameters = T.set_subtensor(_net.parameters[index_to_vary], x)
+        except AttributeError:
+            _net.J = T.set_subtensor(_net.J[index_to_vary], x)
         return _net.fidelity(states, target_states, return_mean=False)
 
     results, _ = theano.scan(

@@ -122,7 +122,7 @@ class QubitNetworkModel(QubitNetwork):
         self.outputs = T.dmatrix('outputs')
 
     def compute_evolution_matrix(self):
-        """Compute matrix exponential of iH."""
+        """Compute matrix exponential of iH, using theano functions."""
         return T.slinalg.expm(self.hamiltonian_model)
 
     def _set_initial_values(self, values=None):
