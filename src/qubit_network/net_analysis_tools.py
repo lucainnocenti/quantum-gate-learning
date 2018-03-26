@@ -164,8 +164,8 @@ def plot_gate(net, ptrace=None,
 # ----------------------------------------------------------------
 
 def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
-                            states=None, target_states=None,
-                            n_states=5):
+                             states=None, target_states=None,
+                             n_states=5, ax=None):
     """Plot the variation of the fidelity with an interaction parameter.
 
     Given an input `QubitNetwork` object, a sample of random input states is
@@ -213,8 +213,9 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
     except AttributeError:
         pars_ref = _net.J
         pars_values = _net.J.get_value()
-    # initialise figure dat
-    fig, ax = plt.subplots(1, 1)
+    # initialise figure object, if the use does not want to plot on his own axis
+    if ax is None:
+        _, ax = plt.subplots(1, 1)
     # initialise array of fidelities (for all states)
     fidelities = np.zeros(shape=(len(states), len(xs)))
     # for state_idx, (state, target_state) in enumerate(zip(states, target_states)):
@@ -237,7 +238,6 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
         fidelities[:, idx] = fids
 
     ax.plot(xs, fidelities.T)
-    fig.canvas.draw()
 
 
 def fidelity_vs_J(net):
@@ -321,7 +321,6 @@ def _load_network_from_pickle_old(data):
         is actually returned as a None because the optimization data was not
         saved in old nets.
     """
-    # from IPython.core.debugger import set_trace; set_trace()
     topology = data.get('net_topology', None)
     interactions = data.get('interactions', None)
     if isinstance(interactions, list):
@@ -367,9 +366,13 @@ def _load_network_from_pickle(filename):
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
     opt_data = data['optimization_data']
-
-    ancillae_state = net_data['ancillae_state']
-    num_ancillae = int(np.log2(ancillae_state.shape[0]))
+    # load ancillae state, if any
+    ancillae_state = net_data.get('ancillae_state', None)
+    if ancillae_state is not None:
+        num_ancillae = int(np.log2(ancillae_state.shape[0]))
+    else:
+        num_ancillae = 0
+    # deduce number of qubits from saved sympy model
     num_qubits = int(np.log2(net_data['sympy_model'].shape[0]))
     model = QubitNetworkGateModel(
         sympy_expr=net_data['sympy_model'],
@@ -432,7 +435,13 @@ class NetDataFile:
         return self.name + ' (' + getext(self.path) + ')'
 
     def __getattr__(self, value):
-        return getattr(self.data, value)
+        if self._data is None:
+            self._load()
+        if hasattr(self._data, value):
+            return getattr(self._data, value)
+        else:
+            raise AttributeError('No attribute with name "{}" in NetDataFile'
+                                 ', nor in its data dict.')
 
     def _load(self):
         """
@@ -441,6 +450,9 @@ class NetDataFile:
         If the data was already loaded, it is loaded again.
         """
         self._data, self._opt_data = load_network_from_file(self.path)
+        if self._data is None:
+            raise ValueError('Something went wrong, unable to load data from'
+                              ' the file "{}"'.format(self.path))
 
     def get_target_gate(self):
         """
