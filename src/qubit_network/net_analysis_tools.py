@@ -506,10 +506,10 @@ class NetDataFile:
         """
         Gives the trained interactions in a nicely formatted DataFrame.
         """
-        interactions, values = self.free_parameters, self.parameters.get_value()
+        interactions_names, values = self.free_parameters, self.parameters.get_value()
         # now put everything in dataframe
         return pd.DataFrame({
-            'interaction': interactions,
+            'interaction': [symb.name for symb in interactions_names],
             'value': values
         }).set_index('interaction')
 
@@ -671,26 +671,31 @@ class NetsDataFolder:
             data = pd.concat((data, new_df), axis=1)
         return data
 
-    def plot_parameters(self, joined=True, hlines=[], return_fig=False):
+    def plot_parameters(self, connectgaps=True, hlines=[], return_fig=False,
+                        marker_size=6):
         """
-        Plot an overlay scatter plot of all the nets.
+        Plot an overlay scatter plot of all the nets using plotly.
         """
+        import plotly.graph_objs as go
+        # retrieve data to plot
         data = self.view_parameters()
         fids = data.columns
-        data.columns = np.arange(len(fids))
-        # stringify indices for the legend later
-        data.index = data.index.map(str)
-        fig = data.iplot(mode='lines+markers', size=6, asFigure=True)
-        # readd legend labels (this is necessary because cufflinks
-        # seems to make a mess when multiple columns have the same name)
-        for trace_idx in range(len(fig.data)):
-            fig.data[trace_idx].name = fids[trace_idx]
-        for trace in fig.data:
-            if joined:
-                trace.update({'connectgaps': True})
-            else:
-                trace.update({'connectgaps': False,
-                              'mode': 'markers'})
+        data_cols = data.values.T
+        # make trace object
+        traces = []
+        for trace_idx, data_col in enumerate(data_cols):
+            trace = go.Scatter(
+                x = data.index,
+                y = data_col,
+                mode='lines+markers',
+                marker=dict(size=marker_size),
+                connectgaps=True,
+                name=fids[trace_idx]
+            )
+            if not connectgaps:
+                trace.update({'connectgaps': False})
+            traces.append(trace)
+        # fig = data.iplot(mode='lines+markers', size=6, asFigure=True)
         # put overlay hlines
         if len(hlines) > 0:
             from .plotly_utils import hline
@@ -698,6 +703,6 @@ class NetsDataFolder:
                                       hlines, dash='dash')
         # finally draw the damn thing
         if return_fig:
-            return fig
+            return traces
         import plotly.offline
-        plotly.offline.iplot(fig)
+        plotly.offline.iplot(traces)

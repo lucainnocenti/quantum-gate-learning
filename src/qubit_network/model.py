@@ -375,11 +375,11 @@ class QubitNetworkGateModel(QubitNetworkModel):
         # stored in `num_system_qubits`
         num_ancillae = self.num_qubits - self.num_system_qubits
         if ancillae_state is not None:
-            raise NotImplementedError('Custom specification of ancillae'
-                                      ' state not implemented yet.')
-        state = qutip.tensor([qutip.basis(2, 0)
-                              for _ in range(num_ancillae)])
-        self.ancillae_state = state
+            self.ancillae_state = ancillae_state
+        else:
+            state = qutip.tensor([qutip.basis(2, 0)
+                                for _ in range(num_ancillae)])
+            self.ancillae_state = state
 
     def _target_outputs_from_inputs_open_map(self, input_states):
         raise NotImplementedError('Not implemented yet')

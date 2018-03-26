@@ -200,10 +200,12 @@ class Optimizer:
         if net_data['ancillae_state'] is None:
             num_system_qubits = num_qubits
         else:
-            raise NotImplementedError('WIP')
+            num_ancillae = int(np.log2(net_data['ancillae_state'].shape[0]))
+            num_system_qubits = num_qubits - num_ancillae
         net = QubitNetworkGateModel(
             num_qubits=num_qubits,
             num_system_qubits=num_system_qubits,
+            ancillae_state=net_data['ancillae_state'],
             free_parameters_order=net_data['free_parameters'],
             sympy_expr=net_data['sympy_model'],
             initial_values=opt_data['final_interactions'])
