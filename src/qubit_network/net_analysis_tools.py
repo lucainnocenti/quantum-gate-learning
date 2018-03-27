@@ -108,10 +108,8 @@ def resave_all_pickle_as_json(path=None):
 # ----------------------------------------------------------------
 
 
-def plot_gate(net, ptrace=None,
-              norm_phase=True, permutation=None, func='abs',
-              fmt='1.2f', annot=True, cbar=False,
-              hvlines=None):
+def plot_gate(net, ptrace=None, norm_phase=True, permutation=None, func='abs',
+              fmt='1.2f', annot=True, cbar=False, hvlines=None, ax=None):
     """Pretty-print the matrix of the currently implemented gate.
 
     Parameters
@@ -149,7 +147,8 @@ def plot_gate(net, ptrace=None,
     else:
         raise ValueError('The possible values are abs, real, imag.')
 
-    _, ax = plt.subplots(figsize=(10, 10))
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 10))
     ax = sns.heatmap(gate,
                      square=True, annot=annot, fmt=fmt,
                      linewidth=1, cbar=cbar)
