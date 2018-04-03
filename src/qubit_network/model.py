@@ -263,6 +263,9 @@ class QubitNetworkModel(QubitNetwork):
             'value': values
         }).set_index('interaction')
 
+    def view_parameters(self, *args, **kwords):
+        return self.net_parameters_to_dataframe(*args, **kwords)
+
     def plot_net_parameters(self, sort_index=True, plotly_online=False,
                             mode='lines+markers+text',
                             overlay_hlines=None,
@@ -287,21 +290,20 @@ class QubitNetworkModel(QubitNetwork):
             cufflinks.go_online()
         else:
             cufflinks.go_offline()
-        # draw overlapping horizontal lines for reference if asked
-        if overlay_hlines is None:
-            overlay_hlines = np.arange(-np.pi, np.pi, np.pi / 2)
-            # return df.iplot(kind='scatter', mode=mode, size=6,
-            #                 title='Values of parameters',
-            #                 asFigure=asFigure, **kwargs)
+        # return df.iplot(kind='scatter', mode=mode, size=6,
+        #                 title='Values of parameters',
+        #                 asFigure=asFigure, **kwargs)
         from .plotly_utils import hline
         fig = df.iplot(kind='scatter', mode=mode, size=6,
                        title='Values of parameters',
-                       text=df.index.tolist(),
+                    #    text=df.index.tolist(),
                        asFigure=True, **kwargs)
-        fig.layout.shapes = hline(0, len(self.free_parameters),
-                                  overlay_hlines, dash='dash')
-        fig.data[0].textposition = 'top'
-        fig.data[0].textfont = dict(color='white', size=13)
+        if overlay_hlines is not None:
+            fig.layout.shapes = hline(0, len(self.free_parameters),
+                                      overlay_hlines, dash='dash')
+        # fig.data[0].textposition = 'none'
+        # fig.data[0].textposition = 'top'
+        # fig.data[0].textfont = dict(color='black', size=9)
         if asFigure:
             return fig
         else:

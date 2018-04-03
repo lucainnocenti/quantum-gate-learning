@@ -440,7 +440,7 @@ class NetDataFile:
             return getattr(self._data, value)
         else:
             raise AttributeError('No attribute with name "{}" in NetDataFile'
-                                 ', nor in its data dict.')
+                                 ', nor in its data dict.'.format(value))
 
     def _load(self):
         """
