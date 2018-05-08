@@ -1,5 +1,6 @@
 import os
 import glob
+import logging
 import fnmatch
 import pprint
 import pickle
@@ -7,6 +8,7 @@ import collections
 
 import numpy as np
 import pandas as pd
+import sympy
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -357,10 +359,11 @@ def _load_network_from_pickle(filename):
     pickle format, using the appropriate `save_to_file` method.
     The returned object is QubitNetworkGateModel.
     """
-
+    logging.info('Trying to load net from pickled file "{}"'.format(filename))
     with open(filename, 'rb') as file:
         data = pickle.load(file)
     if 'J' in data:
+        logging.info('Old format detected. Trying to load using old rules')
         return _load_network_from_pickle_old(data)
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
@@ -371,8 +374,21 @@ def _load_network_from_pickle(filename):
         num_ancillae = int(np.log2(ancillae_state.shape[0]))
     else:
         num_ancillae = 0
-    # deduce number of qubits from saved sympy model
-    num_qubits = int(np.log2(net_data['sympy_model'].shape[0]))
+    logging.info('Number of ancillae: {}'.format(num_ancillae))
+    # Deduce number of qubits from saved model. The model is always saved in
+    # `sympy_model`, but it may NOT be a sympy object. This is because for more
+    # than 4-5 qubits converting into a corresponding sympy matrix gets very
+    # expensive. Instead, alternative equivalent representations are used.
+    # If not a sympy.Matrix object, the model should be a tuple.
+    if isinstance(net_data['sympy_model'], sympy.Matrix):
+        logging.info('Model saved using sympy.Matrix object')
+        num_qubits = int(np.log2(net_data['sympy_model'].shape[0]))
+    # else, we assume the content of 'sympy_model' is a tuple with structure
+    # (parameters, matrices)
+    else:
+        logging.info('Model saved using efficient sympy style')
+        num_qubits = int(np.log2(net_data['sympy_model'][1][0].shape[0]))
+
     model = QubitNetworkGateModel(
         sympy_expr=net_data['sympy_model'],
         target_gate=opt_data['target_gate'],

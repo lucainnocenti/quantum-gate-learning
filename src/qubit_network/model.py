@@ -101,20 +101,19 @@ class QubitNetworkModel(QubitNetwork):
                  free_parameters_order=None,
                  initial_values=None):
         # Initialize `QubitNetwork` parent
-        logging.info('Starting QubitNetwork initialization.')
+        logging.info('Initializing QubitNetworkModel..')
         super().__init__(num_qubits=num_qubits,
                          interactions=interactions,
                          net_topology=net_topology,
                          sympy_expr=sympy_expr,
                          free_parameters_order=free_parameters_order)
         # attributes initialization
-        logging.info('Starting to set initial values.')
+        logging.info('Setting initial values to {}'.format(initial_values))
         self.initial_values = self._set_initial_values(initial_values)
         # The graph is computed starting from the content of `self.matrices`
         # and  `self.initial_values`
-        logging.info('Starting to compile computational graph.')
+        logging.info('Building Hamiltonian computational graph')
         self.parameters, self.hamiltonian_model = self._build_theano_graph()
-        logging.info('Finished compiling computational graph.')
         # self.inputs and self.outputs are the holders for the training/testing
         # inputs and corresponding output states. They are used to build
         # the theano expression for the `fidelity`.

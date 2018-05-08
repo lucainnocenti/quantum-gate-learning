@@ -1,4 +1,5 @@
 import os
+import logging
 import pandas as pd
 import numpy as np
 import qutip
@@ -116,7 +117,6 @@ class Optimizer:
     log
     """
     # pylint: disable=too-many-instance-attributes
-    _in_terminal = False
 
     def __init__(self, net,
                  learning_rate=None, decay_rate=None,
@@ -129,8 +129,7 @@ class Optimizer:
                  headless=False):
         # use headless to suppress printed messages (like you may want
         # to when running the code in a script)
-        if headless:
-            self._in_terminal = True
+        self._in_terminal = headless
         # the net parameter can be a QubitNetwork object or a str
         self.net = Optimizer._load_net(net)
         self.net.target_gate = target_gate
@@ -261,14 +260,21 @@ class Optimizer:
         The idea is here to save all the information required to
         reproduce a given training session.
         """
-        if os.path.isfile(file) and not overwrite:
-            raise FileExistsError('File already exists. Use the `overwrite`'
-                                  ' switch to overwrite existing file.')
+        logging.info('Saving results..')
+        if os.path.isfile(file):
+            if overwrite:
+                logging.info('    Overwriting "{}"'.format(file))
+            else:
+                raise FileExistsError('File already exists. Use the `overwrite'
+                                      '` switch to overwrite existing file.')
+        logging.info('    Building `net_data` dictionary..')
         net_data = dict(
-            sympy_model=self.net.get_matrix(),
+            # sympy_model=self.net.get_matrix(),
+            sympy_model=(self.net.free_parameters, self.net.matrices),
             free_parameters=self.net.free_parameters,
             ancillae_state=self.net.ancillae_state
         )
+        logging.info('    Building `optimization_data` dictionary..')
         optimization_data = dict(
             target_gate=self.net.target_gate,
             hyperparameters=self.hyperpars,
@@ -285,8 +291,7 @@ class Optimizer:
             import pickle
             with open(file, 'wb') as fp:
                 pickle.dump(data_to_save, fp)
-            if not self._in_terminal:
-                print('Successfully saved to {}'.format(file))
+            logging.info('    Successfully saved to "{}"'.format(file))
         else:
             raise ValueError('Only saving to pickle is supported.')
 
@@ -382,8 +387,7 @@ class Optimizer:
         batch_end = (self.vars['index'] + 1) * batch_size
         train_inputs_batch = self.vars['train_inputs'][batch_start: batch_end]
         train_outputs_batch = self.vars['train_outputs'][batch_start: batch_end]
-        if not self._in_terminal:
-            print('Compiling model ...', end='')
+        logging.info('Model compilation - Start')
         self.train_model = theano.function(
             inputs=[self.vars['index']],
             outputs=self.cost,
@@ -402,10 +406,10 @@ class Optimizer:
             updates=None,
             givens={self.net.inputs: self.vars['test_inputs'],
                     self.net.outputs: self.vars['test_outputs']})
-        if not self._in_terminal:
-            print(' done.')
+        logging.info('Model compilation - Finished')
 
     def _run(self, save_parameters=True, len_shown_history=200):
+        logging.info('And... here we go!')
         # generate testing states
         self.refill_test_data()
         # now let's prepare the theano graph
@@ -428,18 +432,18 @@ class Optimizer:
             self.test_epoch(save_parameters=save_parameters)
             if not self._in_terminal:
                 self._update_fig(len_shown_history)
+            logging.info('  Epoch no. {}: {}'.format(
+                n_epoch, self.log['fidelities'][n_epoch]))
             # stop if fidelity 1 is obtained
             if self.log['fidelities'][n_epoch] == 1:
-                if not self._in_terminal:
-                    print('Fidelity 1 obtained, stopping.')
+                logging.info('Fidelity 1 obtained, stopping.')
                 break
             # update learning rate
             self.vars['learning_rate'].set_value(
                 self.hyperpars['initial_learning_rate'] / (
                     1 + self.hyperpars['decay_rate'] * n_epoch))
 
-    def run(self, save_parameters=True, len_shown_history=200,
-            save_after=None):
+    def run(self, save_parameters=True, len_shown_history=200):
         """
         Start the optimization.
 
@@ -457,18 +461,14 @@ class Optimizer:
         len_shown_history : int, optional
             If not None, the figure showing the fidelity for every epoch
             only shows the last `len_shown_history` epochs.
-        save_after : str, optional
-            If not None, it is used to save the results to file.
         """
         args = locals()
         # catch abort to stop training at will
         try:
             self._run(args)
         except KeyboardInterrupt:
+            logging.info('Training manually interrupted')
             pass
-
-        if save_after is not None:
-            self._save_results()
 
     def plot_parameters_history(self, return_fig=False, return_df=False):
         import cufflinks

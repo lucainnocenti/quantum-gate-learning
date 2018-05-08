@@ -86,23 +86,38 @@ class QubitNetwork:
     def _parse_sympy_expr(self, expr, free_parameters_order=None):
         """
         Extract free parameters and matrix coefficients from sympy expr.
+
+        Attributes
+        ----------
+        expr : sympy object or tuple
+            If a `sympy.Matrix` object, it completely characterises the
+            Hamiltonian model to be used.
+            If a `tuple`, it should contain two elements. The first one being
+            a list of `sympy.Symbol` objects, and the second one being a list
+            of matrices to be associated to each `sympy.Symbol`.
         """
-        logging.info("Trying to parse from sympy expression.")
-        try:
+        logging.info("Parsing from sympy expression")
+
+        if hasattr(expr, 'free_symbols'):
+            logging.info('  Detected sympy.Matrix object.')
             if free_parameters_order is not None:
+                logging.info("  A `free_parameters_order` was given.")
                 self.free_parameters = free_parameters_order
             else:
+                logging.info("  No `free_parameters_order` was given, generati"
+                             "ng one automatically.")
                 self.free_parameters = list(expr.free_symbols)
-            _len = expr.shape[0]
-        except TypeError:
-            raise TypeError('`expr` must be a sympy MatrixSymbol object.')
-        # initialize the list of matrices to which each parameter is multiplied
-        self.matrices = []
-        # extract the matrix to which each element is multiplied
-        for parameter in self.free_parameters:
-            self.matrices.append(expr.diff(parameter))
-        # extract and store number of qubits of Hamiltonian
-        self.num_qubits = int(np.log2(_len))
+            # compute number of qubits from sympy matrix object
+            self.num_qubits = int(np.log2(expr.shape[0]))
+            logging.info('  Deriving matrices from sympy expression..')
+            self.matrices = []
+            for parameter in self.free_parameters:
+                self.matrices.append(expr.diff(parameter))
+        elif isinstance(expr, tuple):
+            logging.info('  Detected split sympy model.')
+            self.free_parameters = expr[0]
+            self.matrices = expr[1]
+            self.num_qubits = int(np.log2(self.matrices[0].shape[0]))
 
     def _parse_from_interactions(self, num_qubits, interactions):
         """
@@ -114,7 +129,7 @@ class QubitNetwork:
         being used (as opposite to what happens when the Hamiltonian is
         computed from a sympy expression).
         """
-        logging.info("Trying to parse from interactions...")
+        logging.info("Parsing from `interactions`")
         def make_symbols_and_matrices(interactions):
             free_parameters = []
             matrices = []
@@ -132,12 +147,14 @@ class QubitNetwork:
             raise ValueError('The number of qubits must be given.')
         else:
             self.num_qubits = num_qubits
-
+        logging.info('  Total no. of qubit: {}'.format(self.num_qubits))
         if interactions == 'all':
+            logging.info('  Using interactions=\'all\' mode')
             self.interactions = _at_most_nwise_interactions(num_qubits, 2)
         # a tuple of the kind `('all', ((1, 1), (2, 2)))` means that all
         # XX and YY interactions, and no others, should be used.
         elif isinstance(interactions, tuple) and interactions[0] == 'all':
+            logging.info('  Explicit interactions specified')
             _interactions = _at_most_nwise_interactions(num_qubits, 2)
             self.interactions = []
             # filter list of interactions using given filter
@@ -149,6 +166,7 @@ class QubitNetwork:
         # Otherwise we assume that the input is a list of tuples, with each 
         # representing an n-qubit interaction, like: `[(1, 1), (1, 2), (3, 0)]`
         elif isinstance(interactions, (list, tuple)):
+            logging.info('  Using explicit interactions specification')
             self.interactions = list(interactions)
         else:
             raise ValueError('Value of parameter `interaction` not valid.')
@@ -158,8 +176,6 @@ class QubitNetwork:
 
         self.free_parameters, self.matrices = make_symbols_and_matrices(
             self.interactions)
-
-        logging.info("Finished parsing from interactions.")
 
     def _parse_from_topology(self, num_qubits, topology):
         """
@@ -177,7 +193,7 @@ class QubitNetwork:
             (0, 1, 2): c}
         where `a`, `b` and `c` are `sympy.Symbol` instances.
         """
-        logging.info("Trying to parse from topology.")
+        logging.info("Parsing from `net_topology`")
         self.num_qubits = num_qubits
         self.net_topology = topology
         # ensure that all values are sympy symbols
@@ -225,9 +241,10 @@ class QubitNetwork:
 
     def get_matrix(self, symbolic_paulis=False, sure=False):
         """Return the Hamiltonian matrix as a sympy matrix object."""
-        if self.num_qubits >= 5 and not sure:
-            raise ValueError('For more than 5 qubits computing this can be'
-                             ' very slow, are you sure you want to do it?')
+        if self.num_qubits > 5 and not sure:
+            raise ValueError('This can take quite a while for more than 5 '
+                             'qubits. Call the function with the `sure` pa'
+                             'rameter if you really want to do this.')
         if not symbolic_paulis:
             final_matrix = sympy.Matrix(np.zeros(self.matrices[0].shape))
             for matrix, parameter in zip(self.matrices, self.free_parameters):
