@@ -660,13 +660,32 @@ class NetsDataFolder:
         self = NetsDataFolder(self.path)
         return self
 
-    def view_fidelities(self, n_samples=40):
+    def view_fidelities(self, n_samples=40, additional_fields=None):
+        """Display nets in folder, each with an estimate of the fidelity.
+        
+        The `additional_fields` parameter can be used to print more information
+        than just the fidelity. It must be a list of strings. The accepted
+        strings are: 'num_iterations'.
+        """
         data = self._repr_dataframe(sort=False)
         fids = [net.fidelity_test(n_samples=n_samples)
                 for net in self.nets]
+        # add other information on top of fidelities, if requested
+        other_fields = []
+        if additional_fields is not None:
+            if not isinstance(additional_fields, (list, tuple)):
+                additional_fields = [additional_fields]
+            for field_name in additional_fields:
+                if field_name == 'num_iterations':
+                    iterations = [net.opt_data['log']['fidelities'].shape[0]
+                                  for net in self.nets]
+                    iterations = pd.Series(iterations, name='num iterations')
+                    other_fields.append(iterations)
+        # produce final dataframe to return
         data = pd.concat((
             data,
-            pd.Series(fids, name='fidelity')
+            pd.Series(fids, name='fidelity'),
+            *other_fields
         ), axis=1)
         return data
 
