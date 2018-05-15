@@ -2,6 +2,7 @@ import os
 import logging
 import pandas as pd
 import numpy as np
+import sympy
 import qutip
 
 import theano
@@ -195,7 +196,13 @@ class Optimizer:
         net_data = data['net_data']
         opt_data = data['optimization_data']
         # create QubitNetwork instance
-        num_qubits = np.log2(net_data['sympy_model'].shape[0]).astype(int)
+        if isinstance(net_data['sympy_model'], sympy.Matrix):
+            logging.info('Model saved using sympy.Matrix object')
+            num_qubits = np.log2(net_data['sympy_model'].shape[0]).astype(int)
+        else:
+            logging.info('Model saved using efficient sympy style')
+            num_qubits = int(np.log2(net_data['sympy_model'][1][0].shape[0]))
+
         if net_data['ancillae_state'] is None:
             num_system_qubits = num_qubits
         else:
