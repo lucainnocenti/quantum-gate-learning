@@ -1,6 +1,7 @@
 import os
 import glob
 import logging
+import progressbar
 import fnmatch
 import pprint
 import pickle
@@ -359,11 +360,11 @@ def _load_network_from_pickle(filename):
     pickle format, using the appropriate `save_to_file` method.
     The returned object is QubitNetworkGateModel.
     """
-    logging.info('Trying to load net from pickled file "{}"'.format(filename))
+    logging.debug('Trying to load net from pickled file "{}"'.format(filename))
     with open(filename, 'rb') as file:
         data = pickle.load(file)
     if 'J' in data:
-        logging.info('Old format detected. Trying to load using old rules')
+        logging.debug('Old format detected. Trying to load using old rules')
         return _load_network_from_pickle_old(data)
     # otherwise we can just use `sympy_model`:
     net_data = data['net_data']
@@ -381,12 +382,12 @@ def _load_network_from_pickle(filename):
     # expensive. Instead, alternative equivalent representations are used.
     # If not a sympy.Matrix object, the model should be a tuple.
     if isinstance(net_data['sympy_model'], sympy.Matrix):
-        logging.info('Model saved using sympy.Matrix object')
+        logging.debug('Model saved using sympy.Matrix object')
         num_qubits = int(np.log2(net_data['sympy_model'].shape[0]))
     # else, we assume the content of 'sympy_model' is a tuple with structure
     # (parameters, matrices)
     else:
-        logging.info('Model saved using efficient sympy style')
+        logging.debug('Model saved using efficient sympy style')
         num_qubits = int(np.log2(net_data['sympy_model'][1][0].shape[0]))
 
     model = QubitNetworkGateModel(
@@ -497,6 +498,13 @@ class NetDataFile:
     def opt_data(self):
         if self._data is None:
             self._load()
+        # give warning if _opt_data is None, which probably means this is an
+        # old style net, for which no optimization data has been saved.
+        if self._opt_data is None:
+            import warnings
+            warnings.warn('You tried to access `_opt_data`, but its value has '
+                          'not been set. This can mean that for this net no '
+                          'optimization data was saved.')
         return self._opt_data
 
     def _get_interactions_old_style(self):
@@ -593,16 +601,18 @@ class NetsDataFolder:
         return self._repr_dataframe()._repr_html_()
 
     def _repr_dataframe(self, sort=True):
-        names = [net.name for net in self.nets]
-        target_gates = [net.get_target_gate() for net in self.nets]
+        # names = [net.name for net in self.nets]
+        # target_gates = [net.get_target_gate() for net in self.nets]
         # load sorted data in pandas DataFrame
+        pd.set_option('display.max_colwidth', -1)
         df = pd.DataFrame({
-            'target gates': target_gates,
-            'names': names
-        })[['target gates', 'names']]
+            'paths': self.files
+            # 'target gates': target_gates,
+            # 'names': names
+        })
         # return formatted string
         if sort:
-            return df.sort_values(by=['names']).reset_index(drop=True)
+            return df.sort_values(by=['paths']).reset_index(drop=True)
         else:
             return df
 
@@ -648,15 +658,12 @@ class NetsDataFolder:
         The returned object is a new `NetsDataFolder` instance.
         Simple wildcard matching is provided by `fnmatch.filter`.
         """
-        new_data = NetsDataFolder(self.path)
-        new_data.files = fnmatch.filter(self.files, '*/' + pat)
-        new_data.nets = [net for net in self.nets
-                         if fnmatch.fnmatch(net.name, pat)]
+        logging.info('Filtering using pattern: "{}".'.format(pat))
+        filtered_files = fnmatch.filter(self.files, '*/' + pat)
+        new_data = NetsDataFolder(filtered_files)
+        if len(new_data.files) == 0:
+            print('No matching files.')
         return new_data
-        # names = fnmatch.filter([net.name for net in self.nets], pat)
-        # for net in self.nets:
-        #     if net.name in names:
-        #         yield net
 
     def get_filenames(self):
         return [os.path.splitext(name)[0] for name in self.files]
@@ -665,27 +672,38 @@ class NetsDataFolder:
         self = NetsDataFolder(self.path)
         return self
 
-    def view_fidelities(self, n_samples=40, additional_fields=None):
+    def view_fidelities(self, n_samples=40, num_iterations=True,
+                        num_system_qubits=True, num_ancillae=True):
         """Display nets in folder, each with an estimate of the fidelity.
-        
-        The `additional_fields` parameter can be used to print more information
-        than just the fidelity. It must be a list of strings. The accepted
-        strings are: 'num_iterations'.
         """
         data = self._repr_dataframe(sort=False)
-        fids = [net.fidelity_test(n_samples=n_samples)
-                for net in self.nets]
+        logging.info('Computing fidelities:')
+        # compute fidelities
+        fids = []
+        bar = progressbar.ProgressBar()
+        for net in bar(self.nets):
+            fids.append(net.fidelity_test(n_samples=n_samples))
         # add other information on top of fidelities, if requested
         other_fields = []
-        if additional_fields is not None:
-            if not isinstance(additional_fields, (list, tuple)):
-                additional_fields = [additional_fields]
-            for field_name in additional_fields:
-                if field_name == 'num_iterations':
-                    iterations = [net.opt_data['log']['fidelities'].shape[0]
-                                  for net in self.nets]
-                    iterations = pd.Series(iterations, name='num iterations')
-                    other_fields.append(iterations)
+        if num_iterations:
+            if net._opt_data is not None:
+                iterations = [net.opt_data['log']['fidelities'].shape[0]
+                              for net in self.nets]
+                iterations = pd.Series(iterations, name='num iterations')
+            else:
+                iterations = pd.Series(['???' for _ in self.nets],
+                                       name='num iterations')
+            other_fields.append(iterations)
+        if num_system_qubits:
+            other_fields.append(pd.Series(
+                [net.num_system_qubits for net in self.nets],
+                name='num system qubits'
+            ))
+        if num_ancillae:
+            other_fields.append(pd.Series(
+                [net.num_qubits - net.num_system_qubits for net in self.nets],
+                name='num ancillae'
+            ))
         # produce final dataframe to return
         data = pd.concat((
             data,
