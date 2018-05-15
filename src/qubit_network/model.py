@@ -308,6 +308,10 @@ class QubitNetworkModel(QubitNetwork):
         else:
             return plotly.offline.iplot(fig)
 
+    def plot_gate(*args, **kwargs):
+        import qubit_network.net_analysis_tools as nat
+        return nat.plot_gate(*args, **kwargs)
+
     def generate_training_states(self, *args):
         """Generate training input/output pairs."""
         raise NotImplementedError('Subclasses must override this method.')
@@ -365,6 +369,14 @@ class QubitNetworkGateModel(QubitNetworkModel):
             self._initialize_ancillae(ancillae_state)
         # set size of complex output ket states
         self.outputs_size = 2**(self.num_qubits - self.num_system_qubits)
+
+    def __repr__(self):
+        message = 'QubitNetworkModel object:'
+        message += '\n  Number of system qubits: {}'.format(
+            self.num_system_qubits)
+        message += '\n  Number of ancillary qubits: {}'.format(
+            self.num_qubits - self.num_system_qubits)
+        return message
 
     def _initialize_ancillae(self, ancillae_state):
         """Initialize ancillae states, as a qutip.Qobj object.
