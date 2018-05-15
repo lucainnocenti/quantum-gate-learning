@@ -551,10 +551,21 @@ class NetsDataFolder:
     """
 
     def __init__(self, path_or_files='../data/nets/'):
+        self.files = []
+        self.nets = []
+        self.paths = []
         if isinstance(path_or_files, str):
-            self._load_from_dir(path_or_files)
+            self._load_nets_from_list([path_or_files])
         elif isinstance(path_or_files, (list, tuple)):
-            self._load_from_file_list(path_or_files)
+            self._load_nets_from_list(path_or_files)
+
+    def _add_net_from_file(self, file_):
+        # check that `file` is an actual file
+        if not os.path.isfile(file_):
+            raise ValueError('"{}" is not a valid path.'.format(file))
+        logging.info('Loading net from "{}".'.format(file_))
+        self.files.append(file_)
+        self.nets.append(NetDataFile(file_))
 
     def _load_from_dir(self, path):
         # ensure tha path is of the form 'whatever/'
@@ -563,23 +574,17 @@ class NetsDataFolder:
         # raise error if path is not a directory
         if not os.path.isdir(path):
             raise ValueError('path must be a valid directory.')
-        self.path = path
-        # load pickle files in path
-        self.files = glob.glob(path + '*.pickle')
-        # raise error if no json and pickle files are found
-        if len(self.files) == 0:
-            raise FileNotFoundError('No valid data files found in '
-                                    '{}.'.format(path))
-        # for each data file associate a `NetDataFile` object, and store
-        # the collection of such objects in `self.nets`.
-        self.nets = []
-        for file_ in self.files:
-            self.nets.append(NetDataFile(file_))
+        self.paths.append(path)
+        # for each data file associate a `NetDataFile` object
+        for file_ in glob.glob(path + '*.pickle'):
+            self._add_net_from_file(file_)
 
-    def _load_from_file_list(self, files_list):
-        self.path = None
-        self.files = list(files_list)
-        self.nets = [NetDataFile(file_) for file_ in files_list]
+    def _load_nets_from_list(self, paths_list):
+        for path in paths_list:
+            if os.path.isfile(path):
+                self._add_net_from_file(path)
+            else:
+                self._load_from_dir(path)
 
     def __repr__(self):
         return self._repr_dataframe().__repr__()
