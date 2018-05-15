@@ -63,7 +63,7 @@ class QubitNetwork:
                  free_parameters_order=None,
                  interactions=None,
                  net_topology=None):
-        logging.info("I'm inside QubitNetwork")
+        logging.debug("I'm inside QubitNetwork")
         # initialize class attributes
         self.num_qubits = None  # number of qubits in network
         self.matrices = None  # matrix coefficients for free parameters

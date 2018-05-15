@@ -87,8 +87,8 @@ class Optimizer:
     Parameters
     ----------
     net : object or string
-        Object representing the qubit network to be trained. If a string
-        is given the object is loaded from fileusing `Optimizer._load_net`.
+        Object representing the qubit network to be trained. If a string,
+        the object is loaded from file using `Optimizer._load_net`.
     learning_rate : float
         Initial learning rate for the training. The value of the learning
         rate will usually (depending on the training method) be adapted
@@ -197,10 +197,10 @@ class Optimizer:
         opt_data = data['optimization_data']
         # create QubitNetwork instance
         if isinstance(net_data['sympy_model'], sympy.Matrix):
-            logging.info('Model saved using sympy.Matrix object')
+            logging.debug('Model saved using sympy.Matrix object')
             num_qubits = np.log2(net_data['sympy_model'].shape[0]).astype(int)
         else:
-            logging.info('Model saved using efficient sympy style')
+            logging.debug('Model saved using efficient sympy style')
             num_qubits = int(np.log2(net_data['sympy_model'][1][0].shape[0]))
 
         if net_data['ancillae_state'] is None:
