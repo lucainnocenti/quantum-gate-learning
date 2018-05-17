@@ -124,7 +124,7 @@ def qutip_gate_from_string(gate_name, num_qubits):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--initial_values', type=int)
+    parser.add_argument('--initial_values', type=int, default=None)
     parser.add_argument('--n_epochs', type=int)
     parser.add_argument('--n_attempts', type=int)
     parser.add_argument('--folder', type=str)
