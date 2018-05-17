@@ -31,7 +31,7 @@ from qubit_network.analytical_conditions import commuting_generator
 
 
 def make_optimizer_sympy(sympy_model, target_gate, initial_values, n_epochs,
-                         training_dataset_size, batch_size):
+                         training_dataset_size, batch_size, sgd_method):
     model = QubitNetworkGateModel(
         sympy_expr=sympy_model, initial_values=initial_values)
     optimizer = Optimizer(
@@ -43,18 +43,20 @@ def make_optimizer_sympy(sympy_model, target_gate, initial_values, n_epochs,
         target_gate=target_gate,
         training_dataset_size=training_dataset_size,
         test_dataset_size=100,
-        sgd_method='momentum',
+        sgd_method=sgd_method,
         headless=True
     )
     return model, optimizer
 
 
 def make_optimizer_allints(num_ancillae, target_gate, initial_values, n_epochs,
-                           training_dataset_size, batch_size):
+                           training_dataset_size, batch_size, sgd_method):
     num_system_qubits = int(scipy.log2(target_gate.shape[0]))
     num_qubits = num_system_qubits + num_ancillae
-    model = QubitNetworkGateModel(num_qubits=num_qubits, num_system_qubits=num_system_qubits,
-                                  interactions='all', initial_values=initial_values)
+    model = QubitNetworkGateModel(
+        num_qubits=num_qubits, num_system_qubits=num_system_qubits,
+        interactions='all', initial_values=initial_values
+    )
     optimizer = Optimizer(
         net=model,
         learning_rate=1.,
@@ -64,7 +66,7 @@ def make_optimizer_allints(num_ancillae, target_gate, initial_values, n_epochs,
         target_gate=target_gate,
         training_dataset_size=training_dataset_size,
         test_dataset_size=100,
-        sgd_method='momentum',
+        sgd_method=sgd_method,
         headless=True
     )
     return model, optimizer
@@ -136,6 +138,7 @@ def main():
     parser.add_argument('--num_ancillae', type=int, default=None)
     parser.add_argument('--training_dataset_size', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=2)
+    parser.add_argument('--sgd_method', type=str, default='momentum')
     args = parser.parse_args()
 
     logger = logging.getLogger()
@@ -169,7 +172,8 @@ def main():
                 initial_values=args.initial_values,
                 n_epochs=args.n_epochs,
                 training_dataset_size=args.training_dataset_size,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                sgd_method=args.sgd_method
             )
     elif args.model_type == 'sympy':
         logging.info('Using sympy model')
@@ -181,7 +185,8 @@ def main():
                 initial_values=args.initial_values,
                 n_epochs=args.n_epochs,
                 training_dataset_size=args.training_dataset_size,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                sgd_method=args.sgd_method
             )
 
     for i in range(args.n_attempts):
