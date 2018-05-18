@@ -90,24 +90,45 @@ class Optimizer:
         Object representing the qubit network to be trained. If a string,
         the object is loaded from file using `Optimizer._load_net`.
     learning_rate : float
-        Initial learning rate for the training. The value of the learning
-        rate will usually (depending on the training method) be adapted
-        during training.
+        Initial learning rate for the training.
+        If momentum SGD is used, its value is slowly decreased during the
+        training. If naive SGD is used, its initial value is used for the whole
+        training phase. If adadelta SGD is used, the initial value is not used.
     decay_rate : float
         Determines the rate at which the learning rate decreases for
-        each epoch.
-    training_dataset_size
-    test_dataset_size
-    batch_size
-    n_epochs
-    target_gate
-    sgd_method
+        each epoch (used with momentum SGD).
+    training_dataset_size : integer
+        The number of training states generated for each epoch.
+        At the beginning of each new epoch, a new dataset is generated.
+    test_dataset_size : integer
+        The number of test states used to assess the fidelity at the end of
+        every epoch. This set is generated at the beginning of the training
+        phase, and never changed.
+    batch_size : integer
+        This is the number of iterations that each epoch is divided into.
+        The training states (specified in `training_dataset_size`) are divided
+        into chunks of size `batch_size`.
+    n_epochs : integer
+        Number of epochs after which the training is stopped regardless of the
+        final fidelity. If unit fidelity is achieved, the training stops before
+        this number is reached.
+    target_gate : qutip.Qobj object
+        This value is simply passed to the associated QubitNetworkGateModel
+        instance, in case it wasn't already specified there.
+    sgd_method : string
+        The training method to be used. Accepted values are 'momentum' and
+        'adadelta'. Any other value is assumed to represent naive SGD (with
+        non-adaptive learning rate).
+    headless : bool
+        If True, no fidelity plot is drawn (note that the values of the
+        fidelities for each epoch are still logged).
 
     Attributes
     ----------
-    net : some subclass of QubitNetworkModel
-    hyperpars : dict
-        Contains all the hyperparameters of the model.
+    net : subclass of QubitNetworkModel (often QubitNetworkGateModel)
+    learning_rate : number, optional
+        The initial learning rate. Depending on the training algorithm used,
+        the learning rate may be adadpted during training.
     vars : dict of theano objects
         Contains the theano objects used in the fidelity graph.
     cost
@@ -127,7 +148,8 @@ class Optimizer:
                  n_epochs=None,
                  target_gate=None,
                  sgd_method='momentum',
-                 headless=False):
+                 headless=False,
+                 figax=None):
         # use headless to suppress printed messages (like you may want
         # to when running the code in a script)
         self._in_terminal = headless
@@ -176,8 +198,11 @@ class Optimizer:
         # initialize log to be filled with the history later
         self.log = {'fidelities': None, 'parameters': None}
         # create figure object
-        self._fig = None
-        self._ax = None
+        if figax is None:
+            self._fig = None
+            self._ax = None
+        else:
+            self._fig, self._ax = figax
 
     @classmethod
     def load(cls, file):
@@ -480,9 +505,12 @@ class Optimizer:
     def plot_parameters_history(self, return_fig=False, return_df=False):
         import cufflinks
         names = [par.name for par in self.net.free_parameters]
+        # retrieve parameters history
         df = pd.DataFrame(self._get_meaningful_history()['parameters'])
+        # retrieve initial values and prepend them to history
         initial_values = pd.DataFrame([self.initial_parameters_values])
         df = pd.concat([initial_values, df], ignore_index=True)
+        # set columns name
         new_col_names = dict(zip(range(df.shape[1]), names))
         df.rename(columns=new_col_names, inplace=True)
         if return_df:
