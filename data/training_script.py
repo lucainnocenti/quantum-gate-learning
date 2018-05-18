@@ -193,10 +193,12 @@ def main():
         logging.info('Starting training no.{}'.format(str(i + 1)))
         model, optimizer = optimizer_initializer()
         optimizer.run()
-        optimizer.save_results(
-            './' + args.folder + '/training_no_' + str(i + 1) + '.pickle',
-            overwrite=args.overwrite
-        )
+        if args.folder[0] == '/' or args.folder[0] == '.':
+            file_ = ''
+        else:
+            file_ = './'
+        file_ += args.folder + '/training_no_' + str(i + 1) + '.pickle'
+        optimizer.save_results(file_, overwrite=args.overwrite)
         logging.info('Fidelity obtained: {}'.format(model.fidelity_test()))
 
 
