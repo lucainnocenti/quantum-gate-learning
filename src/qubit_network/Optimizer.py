@@ -165,6 +165,14 @@ class Optimizer:
             initial_learning_rate=learning_rate,
             decay_rate=decay_rate
         )
+        logging.info('Training SGD method: {}.'.format(sgd_method))
+        if sgd_method == 'momentum':
+            logging.info('Initial learning rate: {}.'.format(learning_rate))
+            logging.info('Decay rate: {}.'.format(decay_rate))
+        logging.info('Training dataset size: {}.'.format(training_dataset_size))
+        logging.info('Test dataset size: {}.'.format(test_dataset_size))
+        logging.info('Maximum number of epochs: {}.'.format(n_epochs))
+        logging.info('Batch size: {}.'.format(batch_size))
         # self.vars stores the shared variables for the computation
         def _sharedfloat(arr, name):
             return theano.shared(np.asarray(
@@ -216,6 +224,7 @@ class Optimizer:
         # accept only pickle files as of now
         if ext != '.pickle':
             raise NotImplementedError('Only pickle files for now!')
+        logging.info('Loading optimizer from file: `{}`.'.format(file))
         with open(file, 'rb') as f:
             data = pickle.load(f)
         net_data = data['net_data']
@@ -441,7 +450,7 @@ class Optimizer:
         logging.info('Model compilation - Finished')
 
     def _run(self, save_parameters=True, len_shown_history=200):
-        logging.info('And... here we go!')
+        logging.info('Starting training phase.')
         # generate testing states
         self.refill_test_data()
         # now let's prepare the theano graph
