@@ -17,9 +17,6 @@ import qutip.qip.algorithms.qft
 import theano
 import theano.tensor as T
 
-src_dir = os.path.join(os.getcwd(), os.pardir, 'src')
-sys.path.append(src_dir)
-
 import qubit_network.net_analysis_tools as nat
 import qubit_network.utils
 from qubit_network.utils import chop, complex2bigreal, bigreal2complex, bigreal2qobj
@@ -146,8 +143,8 @@ def main():
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
     # FORMAT = logging.Formatter("%(levelname)s - %(message)s")
-    FORMAT = "[%(filename)18s:%(lineno)3s - %(funcName)25s() ] %(message)s"
-    formatter = logging.Formatter(FORMAT)
+    FORMAT = "[%(asctime)s %(filename)18s:%(lineno)3s - %(funcName)25s()] %(message)s"
+    formatter = logging.Formatter(FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
