@@ -558,7 +558,7 @@ class NetsDataFolder:
     nets : list of NetDataFile objects
     """
 
-    def __init__(self, path_or_files='../data/nets/'):
+    def __init__(self, path_or_files):
         self.files = []
         self.nets = []
         self.paths = []
@@ -612,7 +612,7 @@ class NetsDataFolder:
         })
         # return formatted string
         if sort:
-            return df.sort_values(by=['paths']).reset_index(drop=True)
+            return df.sort_values(by=['paths'])
         else:
             return df
 
