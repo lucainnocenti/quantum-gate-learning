@@ -284,6 +284,7 @@ class Optimizer:
             self.hyperpars['train_dataset_size'])
         msg += '    Test dataset size: {}'.format(
             self.hyperpars['test_dataset_size'])
+        return msg
 
     def _get_meaningful_history(self):
         fids = self.log['fidelities']
