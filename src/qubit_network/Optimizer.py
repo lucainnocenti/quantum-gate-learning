@@ -274,6 +274,17 @@ class Optimizer:
             raise NotImplementedError('To be reimplemented')
         return net
 
+    def __repr__(self):
+        msg = 'Optimizer object. Properties:'
+        msg += '    SGD method: {}'.format(self.hyperpars['sgd_method'])
+        msg += '    Learning rate: {}'.format(
+            self.hyperpars['initial_learning_rate'])
+        msg += '    Decay rate: {}'.format(self.hyperpars['decay_rate'])
+        msg += '    Training dataset size: {}'.format(
+            self.hyperpars['train_dataset_size'])
+        msg += '    Test dataset size: {}'.format(
+            self.hyperpars['test_dataset_size'])
+
     def _get_meaningful_history(self):
         fids = self.log['fidelities']
         # we cut from the history the last contiguous block of
