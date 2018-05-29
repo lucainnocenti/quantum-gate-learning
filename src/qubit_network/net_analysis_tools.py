@@ -1,24 +1,23 @@
-import os
+import collections
+import fnmatch
 import glob
 import logging
-import progressbar
-import fnmatch
-import pprint
+import os
 import pickle
-import collections
-
-import numpy as np
-import pandas as pd
-import sympy
+import pprint
 
 import matplotlib.pyplot as plt
-import seaborn as sns
-import cufflinks
-
+import numpy as np
+import pandas as pd
 import qutip
+import sympy
 
+import cufflinks
+import progressbar
+import seaborn as sns
+
+from .model import QubitNetworkGateModel, QubitNetworkModel
 from .QubitNetwork import QubitNetwork
-from .model import QubitNetworkModel, QubitNetworkGateModel
 from .utils import chop, getext, normalize_phase
 
 

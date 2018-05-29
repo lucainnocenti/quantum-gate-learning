@@ -1,12 +1,13 @@
 import itertools
 
 import numpy as np
+import qutip
 import scipy
 import scipy.linalg
 import sympy
-from sympy.physics.quantum.tensorproduct import TensorProduct
 from sympy.physics.paulialgebra import Pauli
-import qutip
+from sympy.physics.quantum.tensorproduct import TensorProduct
+
 from .utils import chop
 
 

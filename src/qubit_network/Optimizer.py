@@ -1,15 +1,15 @@
-import os
 import logging
-import pandas as pd
-import numpy as np
-import sympy
-import qutip
+import os
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import qutip
+import sympy
 import theano
 import theano.tensor as T
 import theano.tensor.slinalg
 
-import matplotlib.pyplot as plt
 import seaborn as sns
 
 from .model import QubitNetworkGateModel
@@ -464,6 +464,7 @@ class Optimizer:
     def _run(self, save_parameters=True, len_shown_history=200):
         logging.info('Starting training phase.')
         # generate testing states
+        logging.info('Generating batch of testing states.')
         self.refill_test_data()
         # now let's prepare the theano graph
         self._compile_model()
