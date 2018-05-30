@@ -301,6 +301,66 @@ def fidelity_vs_J(net):
         outputs=fidelities
     )
 
+# ----------------------------------------------------------------
+# Computation of average fidelity between gates and maps
+# ----------------------------------------------------------------
+
+
+def big_unitary_to_map(U, dim_system, ancilla_state=0):
+    """Compute (open) action of the unitary U on reduced system.
+
+    From a (generally unitary) matrix `U`, compute the open map representing
+    the action of `U` on a subset of the modes. More precisely, we consider the
+    space as tensor product of a "system" and an "ancilla", and compute the map
+    corresponding to the reduced action of `U` on the system, when the ancilla
+    is in a specific (pure) initial state `ancilla_state`.
+    The resulting map is given as a four-dimensional numpy tensor.
+    """
+    if isinstance(big_unitary, qutip.Qobj):
+        big_unitary = big_unitary.full()
+    else:
+        big_unitary = np.asarray(big_unitary)
+    total_dim = big_unitary.shape[0]
+    dim_ancillae = total_dim // dim_system
+    # sanity check: `dim_system` must divide the dimension of `U`
+    if dim_system * other_dim != full_dim:
+        raise ValueError('This decomposition makes no sense.')
+    # reshape unitary to take into account tensor structure of space
+    gate_as_tensor = big_unitary.reshape((dim_system, dim_ancillae) * 2)
+    # consider only action on specific initial ancilla state
+    gate_as_tensor = gate_as_tensor[:, :, :, ancilla_state]
+    # compute the actual corresponding map tensor
+    map_as_tensor = np.einsum('kmi,lmj->klij', gate_as_tensor, gate_as_tensor.conj())
+    return map_as_tensor
+
+
+def exact_average_fidelity_mapVSunitary(map_, unitary):
+    """Compute average fidelity between a map and a unitary.
+
+    The fidelity is computed exactly using (a variation of) the formulae given
+    in https://arxiv.org/abs/quant-ph/0205035.
+
+    The map is expected to be given as a four-dimensional numpy tensor.
+    The unitary is expected to be given as a two-dimensional numpy tensor.
+    """
+    D = unitary.shape[0]
+    expval = np.einsum('ki,lj,klij', unitary.conj(), unitary, map_).real
+    return 1 / (D + 1) * (1 + expval / D)
+
+
+def exact_average_fidelity_unitaryVSunitary(U, V):
+    """Compute average fidelity between two unitary matrices.
+
+    Both `U` and `V` should be numpy or qutip matrix.
+    """
+    if isinstance(U, qutip.Qobj):
+        U = U.full()
+    if isinstance(V, qutip.Qobj):
+        V = V.full()
+    D = U.shape[0]
+    expval = np.einsum('ij,ij,kl,kl', U.conj(), V, U, V.conj()).real
+    return 1 / (D + 1) * (1 + expval / D)
+
 
 # ----------------------------------------------------------------
 # Loading nets from file
