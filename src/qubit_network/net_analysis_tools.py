@@ -316,21 +316,23 @@ def big_unitary_to_map(U, dim_system, ancilla_state=0):
     is in a specific (pure) initial state `ancilla_state`.
     The resulting map is given as a four-dimensional numpy tensor.
     """
-    if isinstance(big_unitary, qutip.Qobj):
-        big_unitary = big_unitary.full()
+    if isinstance(U, qutip.Qobj):
+        U = U.full()
     else:
-        big_unitary = np.asarray(big_unitary)
-    total_dim = big_unitary.shape[0]
-    dim_ancillae = total_dim // dim_system
+        U = np.asarray(U)
+    total_dim = U.shape[0]
+    other_dim = total_dim // dim_system
     # sanity check: `dim_system` must divide the dimension of `U`
-    if dim_system * other_dim != full_dim:
+    if dim_system * other_dim != total_dim:
         raise ValueError('This decomposition makes no sense.')
     # reshape unitary to take into account tensor structure of space
-    gate_as_tensor = big_unitary.reshape((dim_system, dim_ancillae) * 2)
+    gate_as_tensor = U.reshape((dim_system, other_dim) * 2)
     # consider only action on specific initial ancilla state
     gate_as_tensor = gate_as_tensor[:, :, :, ancilla_state]
     # compute the actual corresponding map tensor
-    map_as_tensor = np.einsum('kmi,lmj->klij', gate_as_tensor, gate_as_tensor.conj())
+    map_as_tensor = np.einsum('kmi,lmj->klij',
+                              gate_as_tensor,
+                              gate_as_tensor.conj())
     return map_as_tensor
 
 
