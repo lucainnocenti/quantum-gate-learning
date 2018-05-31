@@ -458,7 +458,7 @@ class QubitNetworkGateModel(QubitNetworkModel):
             # compute fidelity
             # fidelity = (psi_in.dag() * target_gate.dag() *
             #             dm_out * target_gate * psi_in)
-            fidelities[idx] = qutip.fidelity(target_gate * psi_in, dm_out)
+            fidelities[idx] = qutip.fidelity(target_gate * psi_in, dm_out)**2
         if return_mean:
             return fidelities.mean()
         else:
