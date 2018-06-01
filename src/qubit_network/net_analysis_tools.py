@@ -345,6 +345,8 @@ def exact_average_fidelity_mapVSunitary(map_, unitary):
     The map is expected to be given as a four-dimensional numpy tensor.
     The unitary is expected to be given as a two-dimensional numpy tensor.
     """
+    if isinstance(unitary, qutip.Qobj):
+        unitary = unitary.full()
     D = unitary.shape[0]
     expval = np.einsum('ki,lj,klij', unitary.conj(), unitary, map_).real
     return 1 / (D + 1) * (1 + expval / D)
@@ -734,8 +736,16 @@ class NetsDataFolder:
         return self
 
     def view_fidelities(self, n_samples=40, num_iterations=True,
-                        num_system_qubits=True, num_ancillae=True):
+                        num_system_qubits=True, num_ancillae=True,
+                        exact_fidelity=True):
         """Display nets in folder, each with an estimate of the fidelity.
+
+        Parameters
+        ----------
+        exact_fidelity : bool
+            If True, the fidelity is computed using the exact formula for the
+            average fidelity. Otherwise, the fidelity is estimated with a
+            finite sample size of random states.
         """
         data = self._repr_dataframe(sort=False)
         logging.info('Computing fidelities:')
@@ -743,17 +753,21 @@ class NetsDataFolder:
         fids = []
         bar = progressbar.ProgressBar()
         for net in bar(self.nets):
-            fids.append(net.fidelity_test(n_samples=n_samples))
+            if exact_fidelity:
+                fids.append(net.average_fidelity())
+            else:
+                fids.append(net.fidelity_test(n_samples=n_samples))
         # add other information on top of fidelities, if requested
         other_fields = []
         if num_iterations:
-            if net._opt_data is not None:
-                iterations = [net.opt_data['log']['fidelities'].shape[0]
-                              for net in self.nets]
-                iterations = pd.Series(iterations, name='num iterations')
-            else:
-                iterations = pd.Series(['???' for _ in self.nets],
-                                       name='num iterations')
+            iterations = []
+            for net in self.nets:
+                if net._opt_data is not None:
+                    iterations.append(
+                        net.opt_data['log']['fidelities'].shape[0])
+                else:
+                    iterations.append(0)
+            iterations = pd.Series(iterations, name='num iterations')
             other_fields.append(iterations)
         if num_system_qubits:
             other_fields.append(pd.Series(
@@ -773,14 +787,18 @@ class NetsDataFolder:
         ), axis=1)
         return data
 
-    def view_parameters(self, n_samples=40):
-        """
-        Return a dataframe showing the parameters for every net.
+    def view_parameters(self, exact_average_fidelity=True, n_samples=100):
+        """Return a dataframe showing the parameters for every net.
+
+        `n_samples` is only used if `exact_average_fidelity` is `False`.
         """
         data = None
         for net in self.nets:
             # compute fidelity for net
-            fid = net.fidelity_test(n_samples=n_samples)
+            if exact_average_fidelity:
+                fid = net.average_fidelity()
+            else:
+                fid = net.fidelity_test(n_samples=n_samples)
             # get data for net
             new_df = net.interactions.rename(columns={'value': fid})
             if data is None:

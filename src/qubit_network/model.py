@@ -18,6 +18,7 @@ import seaborn as sns
 from .QubitNetwork import QubitNetwork
 from .theano_qutils import TheanoQstates
 from .utils import complex2bigreal
+from . import net_analysis_tools as nat
 
 
 def _random_input_states(num_states, num_qubits):
@@ -463,6 +464,19 @@ class QubitNetworkGateModel(QubitNetworkModel):
             return fidelities.mean()
         else:
             return fidelities
+
+    def average_fidelity(self):
+        """Compute average fidelity using exact formula."""
+        if self.num_qubits > self.num_system_qubits:
+            dim_system = 2**self.num_system_qubits
+            map_as_tensor = nat.big_unitary_to_map(self.get_current_gate(),
+                                                   dim_system)
+            return nat.exact_average_fidelity_mapVSunitary(map_as_tensor,
+                                                           self.target_gate)
+        else:
+            return nat.exact_average_fidelity_unitaryVSunitary(
+                self.get_current_gate(), self.target_gate
+            )
 
     def fidelity(self, return_mean=True):
         """Return theano graph for fidelity given training states.
