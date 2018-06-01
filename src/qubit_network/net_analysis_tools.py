@@ -808,7 +808,7 @@ class NetsDataFolder:
         return data
 
     def plot_parameters(self, connectgaps=True, hlines=[], return_fig=False,
-                        marker_size=6):
+                        marker_size=6, use_sqrt_fidelity=False):
         """
         Plot an overlay scatter plot of all the nets using plotly.
         """
@@ -816,6 +816,8 @@ class NetsDataFolder:
         # retrieve data to plot
         data = self.view_parameters()
         fids = data.columns
+        if use_sqrt_fidelity:
+            fids = np.sqrt(fids)
         data_cols = data.values.T
         # make trace object
         traces = []
