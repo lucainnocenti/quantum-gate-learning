@@ -164,15 +164,36 @@ def plot_gate(net, ptrace=None, norm_phase=True, permutation=None, func='abs',
 # Functions ot plot the fidelity vs J parameters for various random states.
 # ----------------------------------------------------------------
 
-def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
+def plot_fidelity_vs_J_qutip(net, xs, index_to_vary, average=False,
                              states=None, target_states=None,
-                             n_states=5, ax=None):
+                             n_states=None, ax=None):
     """Plot the variation of the fidelity with an interaction parameter.
 
     Given an input `QubitNetwork` object, a sample of random input states is
     generated, and on each of them the fidelity is computed as a function of
     one of the interaction parameters.
     The resulting plot is updated every time the graph of a state is completed.
+
+    Parameters
+    ----------
+    net : QubitNetworkModel object
+    xs : list of floats
+        Values used on the x-axis for the generated plot
+    index_to_vary : str or int
+        Which indices should be varied. Accepted values are:
+        - 'all': all indices will be varied at the same time, and `xs` will
+        be interpreted as set of *relative* variations. In other words, we
+        study robustness with respect to time variations.
+        - integer: interpreted as the index of the parameter to be varied.
+        In this case the values of `xs` will represent *absolute* variations.
+    average : bool
+        If True, a single plot is produced, of the average gate fidelity vs
+        the varied parameters (how the parameters are varied is still
+        determined by `xs` and `index_to_vary`).
+    states
+    target_states
+    n_states
+    ax
 
     Examples
     --------
@@ -187,8 +208,12 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
     import copy
     import matplotlib.pyplot as plt
     import theano
-    # from IPython.core.debugger import set_trace; set_trace()
-    if states is None or target_states is None:
+    if average and (states is not None or target_states is not None
+                    or n_states is not None):
+        raise ValueError('If computing the averagee fidelity, the arguments '
+                         '`states`, `target_states`, and `n_states` are not '
+                         'used.')
+    if not average and (states is None or target_states is None):
         # states, target_states = net.generate_training_states(n_states)
         hs_dims = 2**net.num_system_qubits
         dims = [[2] * net.num_system_qubits, [1] * net.num_system_qubits]
@@ -218,7 +243,10 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
     if ax is None:
         _, ax = plt.subplots(1, 1)
     # initialise array of fidelities (for all states)
-    fidelities = np.zeros(shape=(len(states), len(xs)))
+    if average:
+        fidelities = np.zeros(shape=len(xs))
+    else:
+        fidelities = np.zeros(shape=(len(states), len(xs)))
     # for state_idx, (state, target_state) in enumerate(zip(states, target_states)):
     import progressbar
     bar = progressbar.ProgressBar()
@@ -231,14 +259,20 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary,
         else:
             new_pars[index_to_vary] = x
         pars_ref.set_value(new_pars)
-        current_gate = _net.get_current_gate()
-        fids = []
-        for state, target_state in zip(states, target_states):
-            out_state = (current_gate * state).ptrace(range(_net.num_system_qubits))
-            fids.append(qutip.fidelity(out_state, target_state))
-        fidelities[:, idx] = fids
-
-    ax.plot(xs, fidelities.T)
+        if average:
+            fidelities[idx] = _net.average_fidelity()
+        else:
+            current_gate = _net.get_current_gate()
+            fids = []
+            for state, target_state in zip(states, target_states):
+                out_state = (current_gate * state).ptrace(
+                    range(_net.num_system_qubits))
+                fids.append(qutip.fidelity(out_state, target_state)**2)
+            fidelities[:, idx] = fids
+    if average:
+        ax.plot(xs, fidelities, '--')
+    else:
+        ax.plot(xs, fidelities.T)
 
 
 def fidelity_vs_J(net):
