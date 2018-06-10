@@ -12,7 +12,7 @@ import theano.tensor.slinalg
 
 import seaborn as sns
 
-from .model import QubitNetworkGateModel
+from . import model
 
 
 def _gradient_updates_momentum(params, grad, learning_rate, momentum):
@@ -242,7 +242,7 @@ class Optimizer:
         else:
             num_ancillae = int(np.log2(net_data['ancillae_state'].shape[0]))
             num_system_qubits = num_qubits - num_ancillae
-        net = QubitNetworkGateModel(
+        net = model.QubitNetworkGateModel(
             num_qubits=num_qubits,
             num_system_qubits=num_system_qubits,
             ancillae_state=net_data['ancillae_state'],

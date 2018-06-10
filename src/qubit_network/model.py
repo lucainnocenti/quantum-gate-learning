@@ -18,7 +18,6 @@ import seaborn as sns
 from .QubitNetwork import QubitNetwork
 from .theano_qutils import TheanoQstates
 from .utils import complex2bigreal
-from . import net_analysis_tools as nat
 
 
 def _random_input_states(num_states, num_qubits):
@@ -134,9 +133,11 @@ class QubitNetworkModel(QubitNetwork):
         with zeros. The computed initial values are returned, to be
         stored in self.initial_values from __init__
         """
-        if values is None:
+        if values is None or (isinstance(values, str) and values == 'random'):
             initial_values = np.random.randn(len(self.free_parameters))
+            logging.info('Setting random initial parameters values.')
         elif isinstance(values, numbers.Number):
+            logging.info('Initial parameters values: {}.'.format(values))
             initial_values = np.ones(len(self.free_parameters)) * values
         # A dictionary can be used to directly set the values of some of
         # the parameters. Each key of the dictionary can be either a
@@ -148,6 +149,7 @@ class QubitNetworkModel(QubitNetwork):
         # All the symbols not specified in the dictionary are initialized
         # to zero.
         elif isinstance(values, dict):
+            logging.info('Setting initial parameters values in dict mode.')
             init_values = np.zeros(len(self.free_parameters))
             symbols_dict = dict(zip(
                 self.free_parameters, range(len(self.free_parameters))))
@@ -171,6 +173,7 @@ class QubitNetworkModel(QubitNetwork):
             initial_values = init_values
         else:
             initial_values = values
+            logging.info('Initial parameters values set to: {}'.format(values))
 
         return initial_values
 
@@ -367,6 +370,12 @@ class QubitNetworkGateModel(QubitNetworkModel):
                 self.num_system_qubits = self.num_qubits - num_ancillae
         else:
             self.num_system_qubits = num_system_qubits
+        logging.info('Number of system qubits: {}.'.format(
+            self.num_system_qubits
+        ))
+        logging.info('Number of ancillary qubits: {}.'.format(
+            self.num_qubits - self.num_system_qubits
+        ))
         # Initialise the ancillae, if any
         if self.num_system_qubits < self.num_qubits:
             self._initialize_ancillae(ancillae_state)
@@ -467,6 +476,7 @@ class QubitNetworkGateModel(QubitNetworkModel):
 
     def average_fidelity(self):
         """Compute average fidelity using exact formula."""
+        from . import net_analysis_tools as nat
         if self.num_qubits > self.num_system_qubits:
             dim_system = 2**self.num_system_qubits
             map_as_tensor = nat.big_unitary_to_map(self.get_current_gate(),
