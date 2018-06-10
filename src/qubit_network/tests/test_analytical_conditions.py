@@ -29,14 +29,14 @@ class TestAnalyticalConditions(unittest.TestCase):
             [(1,0),(2,0),(3,0),(0,1),(0,2),(0,3),(1,1),(2,2),(3,3)]
         )
 
-    def test_is_diagonal_interaction(self):
-        self.assertTrue(ac.is_diagonal_interaction((1, )))
-        self.assertTrue(ac.is_diagonal_interaction((1, 0)))
-        self.assertTrue(ac.is_diagonal_interaction((1, 1)))
-        self.assertTrue(ac.is_diagonal_interaction((1, 1, 1)))
-        self.assertTrue(ac.is_diagonal_interaction((1, 0, 0)))
-        self.assertFalse(ac.is_diagonal_interaction((1, 2)))
-        self.assertFalse(ac.is_diagonal_interaction((1, 0, 2)))
+    def test__is_diagonal_interaction(self):
+        self.assertTrue(ac._is_diagonal_interaction((1, )))
+        self.assertTrue(ac._is_diagonal_interaction((1, 0)))
+        self.assertTrue(ac._is_diagonal_interaction((1, 1)))
+        self.assertTrue(ac._is_diagonal_interaction((1, 1, 1)))
+        self.assertTrue(ac._is_diagonal_interaction((1, 0, 0)))
+        self.assertFalse(ac._is_diagonal_interaction((1, 2)))
+        self.assertFalse(ac._is_diagonal_interaction((1, 0, 2)))
 
     def test_commuting_generator_xx(self):
         generator = qutip.tensor(qutip.sigmax(), qutip.sigmax())

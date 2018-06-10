@@ -71,10 +71,28 @@ def _nwise_interactions(num_qubits, n):
     return interactions
 
 
+def _is_diagonal_interaction(int_tuple):
+    """True if the tuple represents a diagonal interaction.
+
+    A one-qubit interaction is automatically "diagonal".
+
+    Examples
+    --------
+    >>> _is_diagonal_interaction((2, 2))
+    True
+    >>> _is_diagonal_interaction((2, 0))
+    True
+    >>> _is_diagonal_interaction((1, 1, 2))
+    False
+    """
+    nonzero_indices = [idx for idx in int_tuple if idx != 0]
+    return len(set(nonzero_indices)) == 1
+
+
 def _nwise_diagonal_interactions(num_qubits, n):
     """All diagonal n-qubit interactions."""
     all_ints = _nwise_interactions(num_qubits, n)
-    diagonal_ints = [tup for tup in all_ints if is_diagonal_interaction(tup)]
+    diagonal_ints = [tup for tup in all_ints if _is_diagonal_interaction(tup)]
     return diagonal_ints
 
 
@@ -111,24 +129,6 @@ def J(*args):
     return sympy.Symbol('J' + ''.join(str(arg) for arg in args))
 
 
-def is_diagonal_interaction(int_tuple):
-    """True if the tuple represents a diagonal interaction.
-
-    A one-qubit interaction is automatically "diagonal".
-
-    Examples
-    --------
-    >>> is_diagonal_interaction((2, 2))
-    True
-    >>> is_diagonal_interaction((2, 0))
-    True
-    >>> is_diagonal_interaction((1, 1, 2))
-    False
-    """
-    nonzero_indices = [idx for idx in int_tuple if idx != 0]
-    return len(set(nonzero_indices)) == 1
-
-
 def pairwise_interactions_indices(num_qubits):
     """List of 1- and 2- qubit interaction terms."""
     return _at_most_nwise_interactions(num_qubits, 2)
@@ -137,7 +137,8 @@ def pairwise_interactions_indices(num_qubits):
 def pairwise_diagonal_interactions_indices(num_qubits):
     """List of 1- and 2- qubit diagonal interaction terms."""
     all_ints = pairwise_interactions_indices(num_qubits)
-    return [interaction for interaction in all_ints if is_diagonal_interaction(interaction)]
+    return [interaction for interaction in all_ints
+            if _is_diagonal_interaction(interaction)]
 
 
 def indices_to_hamiltonian(interactions_indices):
