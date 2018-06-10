@@ -1,3 +1,6 @@
+"""
+Test docstring
+"""
 import collections
 import fnmatch
 import glob
@@ -5,6 +8,7 @@ import logging
 import os
 import pickle
 import pprint
+import numbers
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -161,7 +165,7 @@ def plot_gate(net, ptrace=None, norm_phase=True, permutation=None, func='abs',
 
 
 # ----------------------------------------------------------------
-# Functions ot plot the fidelity vs J parameters for various random states.
+# Plot fidelities and other stuff
 # ----------------------------------------------------------------
 
 def plot_fidelity_vs_J_qutip(net, xs, index_to_vary, average=False,
@@ -335,6 +339,127 @@ def fidelity_vs_J(net):
         outputs=fidelities
     )
 
+
+def plot_fidelities_various_ancillae(data, use_plotly=False,
+                                     separating_details=[]):
+    """Plot final fidelities of a set of trained nets.
+
+    Attributes
+    ----------
+    data : obj
+        Can be the pandas DataFrame as given by the `view_fidelities` method of
+        `NetsDataFolder`, or directly the `NetsDataFolder` object.
+    use_plotly : bool
+        If not, matplotlib is used.
+    separating_details : list of strings
+        Each element of this list must be a valid column of the dataset.
+        These fields are used to draw the fidelities with different colors.
+    """
+    if isinstance(data, NetsDataFolder):
+        dataset = data.view_fidelities()
+        if separating_details:
+            # if the user requested to use initial interactions, let's try to
+            # generate the corresponding data
+            if 'initial_interactions' in separating_details:
+                initints = [net.opt_data['initial_interactions'] for net in data]
+                initints = [ints[0] if np.all(ints == ints[0]) else 'random'
+                            for ints in initints]
+                initints = [str(x) for x in initints]
+                unique_ints = list(set(initints))
+                sorted_types = sorted(str(x) for x in unique_ints)
+                dataset['initial_interactions'] = pd.Categorical(
+                    initints,
+                    sorted_types
+                )
+            # ADD POSSIBILITY TO ADD SGD METHOD
+    else:
+        dataset = data.copy()
+    # get meaningful parts of paths
+    def get_basename(path):
+        base, _ = os.path.split(path)
+        return os.path.basename(base)
+    dataset['paths'] = dataset['paths'].apply(get_basename)
+    # check that all specified details actually exist
+    identifying_details = separating_details
+    if separating_details:
+        for detail in separating_details:
+            try:
+                dataset[detail]
+            except KeyError:
+                raise ValueError('Some of the specified details are not in the'
+                                 'provided dataset.')
+    dataset = (dataset.sort_values(by=identifying_details, axis=0)
+                      .reset_index(drop=True))
+    # get unique identifiers
+    unique_identifiers = set()
+    for idx, row in dataset.iterrows():
+        details = []
+        for detail_str in identifying_details:
+            details.append(row[detail_str])
+        details = tuple(details)
+        unique_identifiers.add(details)
+    # ---- INITIALIZE FIGURE
+    if not use_plotly:
+        # initialize figure object
+        fig, ax = plt.subplots(figsize=(8, 4))
+        # make colors
+        colors = plt.cm.get_cmap('hsv', len(unique_identifiers) + 1)
+    else:
+        traces = []
+        max_idx = 0 # used to determine end points of horizontal lines
+    # ---- EXTRACT STUFF TO PLOT, AND PLOT IT
+    for idx, details in enumerate(unique_identifiers):
+        mask = None
+        for detail_idx, detail_str in enumerate(identifying_details):
+            if mask is None:
+                mask = dataset[detail_str] == details[detail_idx]
+            else:
+                mask = mask & (dataset[detail_str] == details[detail_idx])
+        df = dataset.loc[mask]
+        if not use_plotly:
+            df.plot(y='fidelity', ax=ax, linewidth=1, marker='o', markersize=4,
+                    c=colors(idx))
+        else:
+            import plotly
+            import plotly.offline
+            import plotly.graph_objs as go
+            trace = go.Scatter(
+                x=df.index,
+                y=df['fidelity'],
+                mode='lines+markers',
+                marker=dict(size=4),
+                name=str(details)
+            )
+            traces.append(trace)
+            if max(df.index) > max_idx:
+                max_idx = max(df.index)
+
+    # find maximum fidelity to draw the horizontal line
+    max_fidelity = dataset['fidelity'].max()
+
+    if not use_plotly:
+        # regular matplotlib plot
+        ax.legend(unique_identifiers)
+        ax.axhline(y=max_fidelity)
+        ax.set_yticks(list(ax.get_yticks()) + [max_fidelity])
+        plt.tight_layout()
+    else:
+        # use plotly
+        layout = go.Layout(
+            shapes=[dict(
+                type='line',
+                x0=0,
+                x1=max_idx,
+                y0=max_fidelity,
+                y1=max_fidelity,
+                line=dict(color='black', width=1, dash='solid'),
+                opacity=0.5
+            )],
+            legend=dict(orientation="h")
+        )
+        fig = go.Figure(data=traces, layout=layout)
+        plotly.offline.iplot(fig)
+
 # ----------------------------------------------------------------
 # Computation of average fidelity between gates and maps
 # ----------------------------------------------------------------
@@ -389,7 +514,7 @@ def exact_average_fidelity_mapVSunitary(map_, unitary):
 def exact_average_fidelity_unitaryVSunitary(U, V):
     """Compute average fidelity between two unitary matrices.
 
-    Both `U` and `V` should be numpy or qutip matrix.
+    Both `U` and `V` should be numpy or qutip matrices.
     """
     if isinstance(U, qutip.Qobj):
         U = U.full()
@@ -821,25 +946,29 @@ class NetsDataFolder:
         ), axis=1)
         return data
 
-    def view_parameters(self, exact_average_fidelity=True, n_samples=100):
+    def view_parameters(self, exact_average_fidelity=True, n_samples=None):
         """Return a dataframe showing the parameters for every net.
 
         `n_samples` is only used if `exact_average_fidelity` is `False`.
         """
-        data = None
-        for net in self.nets:
-            # compute fidelity for net
-            if exact_average_fidelity:
-                fid = net.average_fidelity()
-            else:
-                fid = net.fidelity_test(n_samples=n_samples)
-            # get data for net
-            new_df = net.interactions.rename(columns={'value': fid})
-            if data is None:
-                data = new_df
-                continue
-            data = pd.concat((data, new_df), axis=1)
-        return data
+        if exact_average_fidelity and n_samples is not None:
+            raise ValueError('The parameteres `exact_average_fidelity` and '
+                             '`n_samples` are not compatible with each other.')
+        # extract fidelities
+        if exact_average_fidelity:
+            all_fids = [net.average_fidelity() for net in self.nets]
+        else:
+            all_fids = [net.fidelity_test(n_samples) for net in self.nets]
+        all_fids = np.asarray(all_fids)
+        # extract parameters
+        parameters = [net.parameters.get_value() for net in self.nets]
+        parameters = np.asarray(parameters)
+        # extract symbols names
+        pars_names = [par.name for par in self.nets[0].data.free_parameters]
+        # join everything together
+        data_for_df = np.concatenate((all_fids[:, None], parameters), axis=1)
+        return pd.DataFrame(data_for_df, columns=['fidelities'] + pars_names)
+
 
     def plot_parameters(self, connectgaps=True, hlines=[], return_fig=False,
                         marker_size=6, use_sqrt_fidelity=False):
@@ -849,20 +978,20 @@ class NetsDataFolder:
         import plotly.graph_objs as go
         # retrieve data to plot
         data = self.view_parameters()
-        fids = data.columns
         if use_sqrt_fidelity:
             fids = np.sqrt(fids)
-        data_cols = data.values.T
         # make trace object
         traces = []
-        for trace_idx, data_col in enumerate(data_cols):
+        for trace_idx in range(data.shape[0]):
+            row = data.iloc[trace_idx]
+            fid = row.pop('fidelities')
             trace = go.Scatter(
-                x = data.index,
-                y = data_col,
+                x = row.index,
+                y = row,
                 mode='lines+markers',
                 marker=dict(size=marker_size),
                 connectgaps=True,
-                name=fids[trace_idx]
+                name='{:>2}, fid={:3.2f}'.format(row.name, fid)
             )
             if not connectgaps:
                 trace.update({'connectgaps': False})
