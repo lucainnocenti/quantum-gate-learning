@@ -340,7 +340,7 @@ def fidelity_vs_J(net):
     )
 
 
-def plot_fidelities_various_ancillae(data, use_plotly=False,
+def plot_fidelities_various_ancillae(data, use_plotly=False, return_fig=False,
                                      separating_details=[]):
     """Plot final fidelities of a set of trained nets.
 
@@ -459,6 +459,8 @@ def plot_fidelities_various_ancillae(data, use_plotly=False,
             legend=dict(orientation="h")
         )
         fig = go.Figure(data=traces, layout=layout)
+        if return_fig:
+            return fig
         plotly.offline.iplot(fig)
 
 # ----------------------------------------------------------------
