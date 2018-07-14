@@ -364,12 +364,13 @@ def plot_fidelities_various_ancillae(data, use_plotly=False,
                 initints = [net.opt_data['initial_interactions'] for net in data]
                 initints = [ints[0] if np.all(ints == ints[0]) else 'random'
                             for ints in initints]
-                initints = [str(x) for x in initints]
-                unique_ints = list(set(initints))
-                sorted_types = sorted(str(x) for x in unique_ints)
+                sorted_initints = sorted(x for x in set(initints)
+                                         if isinstance(x, numbers.Number))
+                sorted_initints += [x for x in set(initints)
+                                    if not isinstance(x, numbers.Number)]
                 dataset['initial_interactions'] = pd.Categorical(
                     initints,
-                    sorted_types
+                    sorted_initints
                 )
             # ADD POSSIBILITY TO ADD SGD METHOD
     else:
@@ -846,6 +847,7 @@ class NetsDataFolder:
                 return self
             elif isinstance(key, (list, tuple)):
                 self.nets = [self.nets[idx] for idx in key]
+                self.files = [self.files[idx] for idx in key]
                 return self
             else:
                 return self.nets[key]
@@ -978,31 +980,44 @@ class NetsDataFolder:
         import plotly.graph_objs as go
         # retrieve data to plot
         data = self.view_parameters()
+        # retrieve fidelities
+        fidelities = data['fidelities']
+        data = data.T
+        data.drop('fidelities', inplace=True)
         if use_sqrt_fidelity:
-            fids = np.sqrt(fids)
+            fidelities = np.sqrt(fidelities)
+        # use more or less natural sorting of interactions labels
+        def intlabels_order(label):
+            if label[0] == 'J':
+                # num_zeros = len([i for i in label[1:] if i == '0'])
+                weight = 0
+                label = label[1:]
+                for pos, c in enumerate(label):
+                    if c == '0':
+                        weight -= 100
+                    else:
+                        weight += 10 * int(c) + pos
+                return weight
+            else:
+                raise ValueError('Not implemented')
+        neworder = sorted(data.index.tolist(), key=intlabels_order)
+        data = data.reindex(neworder)
         # make trace object
         traces = []
-        for trace_idx in range(data.shape[0]):
-            row = data.iloc[trace_idx]
-            fid = row.pop('fidelities')
+        for idx, col_label in enumerate(data):
+            row = data[col_label]
             trace = go.Scatter(
                 x = row.index,
                 y = row,
                 mode='lines+markers',
                 marker=dict(size=marker_size),
                 connectgaps=True,
-                name='{:>2}, fid={:3.2f}'.format(row.name, fid)
+                name='{:>2}, fid={:3.2f}'.format(row.name, fidelities[idx])
             )
             if not connectgaps:
                 trace.update({'connectgaps': False})
             traces.append(trace)
-        # fig = data.iplot(mode='lines+markers', size=6, asFigure=True)
-        # put overlay hlines
-        if len(hlines) > 0:
-            from .plotly_utils import hline
-            fig.layout.shapes = hline(0, len(data) - 1,
-                                      hlines, dash='dash')
-        # finally draw the damn thing
+        # finally draw the damn thing (or return its descriptor)
         if return_fig:
             return traces
         import plotly.offline
