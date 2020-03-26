@@ -269,14 +269,17 @@ def plot_fidelity_vs_J_qutip(net, xs, index_to_vary, average=False,
             current_gate = _net.get_current_gate()
             fids = []
             for state, target_state in zip(states, target_states):
-                out_state = (current_gate * state).ptrace(
-                    range(_net.num_system_qubits))
-                fids.append(qutip.fidelity(out_state, target_state)**2)
+                out_state = current_gate * state
+                if _net.num_system_qubits < _net.num_qubits:
+                    out_state = out_state.ptrace(range(_net.num_system_qubits))
+                fid = np.abs(np.vdot(out_state, target_state))**2
+                fids.append(fid)
             fidelities[:, idx] = fids
     if average:
         ax.plot(xs, fidelities, '--')
     else:
-        ax.plot(xs, fidelities.T)
+        ax.plot(xs, np.log10(1 - fidelities.T))
+    return ax
 
 
 def fidelity_vs_J(net):
